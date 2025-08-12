@@ -2,7 +2,7 @@
 
 A client-side migration tool for the AT Protocol ecosystem, allowing users to transfer their accounts between different Personal Data Servers (PDS) while preserving all data and identity information.
 
-![Migration Service UI](https://via.placeholder.com/800x400?text=ATProto+Migration+Service)
+![Migration Service UI](https://tektite.cc)
 
 ## Overview
 
