@@ -119,7 +119,6 @@ Production files will be output to the `dist` directory.
 3. **Put opinionated changes behind toggles**.
 4. Avoid PRs that…
   - Rename common terms (e.g., “Post” → “Skeet”)
-  - Replace core libraries without strong need (e.g., MobX → Redux)
   - Add entirely new features with no prior discussion
 
 If your idea isn’t a fit, feel free to **fork** – that’s the beauty of open source!
