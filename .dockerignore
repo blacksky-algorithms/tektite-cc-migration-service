@@ -1,0 +1,13 @@
+**/target
+**/dist
+LICENSES
+LICENSE
+temp
+README.md
+.git
+.gitignore
+*.md
+**/.DS_Store
+**/node_modules
+**/.env
+**/.env.*
