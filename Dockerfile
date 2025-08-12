@@ -17,7 +17,7 @@ RUN cargo binstall dioxus-cli --root /.cargo -y --force
 ENV PATH="/.cargo/bin:$PATH"
 
 # Create the final bundle folder. Bundle always executes in release mode with optimizations enabled
-RUN dx bundle --platform web
+RUN dx bundle --platform web --package web
 
 # Use nginx to serve static files
 FROM nginx:alpine AS runtime
