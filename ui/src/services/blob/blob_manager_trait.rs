@@ -89,6 +89,43 @@ impl BlobManagerTrait for crate::services::blob::blob_opfs_storage::OpfsBlobMana
     }
 }
 
+/// IndexedDB implementation of BlobManagerTrait (fallback between OPFS and LocalStorage)
+#[async_trait(?Send)]
+impl BlobManagerTrait for crate::services::blob::blob_idb_storage::IdbBlobManager {
+    async fn store_blob(&self, cid: &str, data: Vec<u8>) -> Result<(), BlobManagerError> {
+        self.store_blob(cid, data).await
+            .map_err(|e| BlobManagerError::StorageError(e.to_string()))
+    }
+    
+    async fn store_blob_with_retry(&self, cid: &str, data: Vec<u8>) -> Result<(), BlobManagerError> {
+        self.store_blob_with_retry(cid, data).await
+            .map_err(|e| BlobManagerError::StorageError(e.to_string()))
+    }
+    
+    async fn retrieve_blob(&self, cid: &str) -> Result<Vec<u8>, BlobManagerError> {
+        self.retrieve_blob(cid).await
+            .map_err(|e| BlobManagerError::StorageError(e.to_string()))
+    }
+    
+    async fn has_blob(&self, cid: &str) -> bool {
+        self.has_blob(cid).await
+    }
+    
+    async fn cleanup_blobs(&self) -> Result<(), BlobManagerError> {
+        self.cleanup_blobs().await
+            .map_err(|e| BlobManagerError::StorageError(e.to_string()))
+    }
+    
+    async fn get_storage_usage(&self) -> Result<u64, BlobManagerError> {
+        self.get_storage_usage().await
+            .map_err(|e| BlobManagerError::StorageError(e.to_string()))
+    }
+    
+    fn storage_name(&self) -> &'static str {
+        "IndexedDB"
+    }
+}
+
 /// LocalStorage implementation of BlobManagerTrait (fallback)
 #[async_trait(?Send)]
 impl BlobManagerTrait for crate::services::blob::blob_storage::BlobManager {

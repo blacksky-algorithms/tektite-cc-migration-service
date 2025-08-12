@@ -11,10 +11,7 @@ pub fn validate_form3_complete(state: &MigrationState) -> bool {
 
 /// Validates that Form 3 handle field has valid availability status
 pub fn validate_handle_availability(state: &MigrationState) -> bool {
-    match state.validations.handle {
-        HandleValidation::Available => true,
-        _ => false,
-    }
+    matches!(state.validations.handle, HandleValidation::Available)
 }
 
 /// Validates that the migration can proceed (all required data present)

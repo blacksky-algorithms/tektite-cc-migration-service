@@ -66,14 +66,36 @@ pub fn MigrationService() -> Element {
                 "PDS Migration Service"
             }
 
+            // Recommendations Banner
+            div {
+                class: "recommendations-banner",
+                div {
+                    class: "banner-header",
+                    "⚠️ Important Recommendations"
+                }
+                ul {
+                    class: "recommendation-list",
+                    li { "📱➡️💻 Use a laptop or desktop computer for the best experience" }
+                    li { "🌐 Use Chrome or a Chromium-based browser for optimal compatibility" }
+                    li { "📶 If using a mobile device, ensure you have a stable Wi-Fi connection" }
+                    li { "⚠️ Use this tool at your own risk - we are not liable for any data loss" }
+                }
+            }
+
             // Form 1: Login to Current PDS - Using Client-side by default  
-            {render_login_form(state, dispatch)}
+            div {
+                class: if state().current_step == FormStep::PlcVerification { "form-frozen" } else { "" },
+                {render_login_form(state, dispatch)}
+            }
 
             // Form 2: New PDS URL (shown only after successful login)
             if state().should_show_form2() {
-                PdsSelectionForm {
-                    state: state,
-                    dispatch: dispatch
+                div {
+                    class: if state().current_step == FormStep::PlcVerification { "form-frozen" } else { "" },
+                    PdsSelectionForm {
+                        state: state,
+                        dispatch: dispatch
+                    }
                 }
             }
 

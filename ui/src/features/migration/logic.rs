@@ -385,9 +385,11 @@ async fn migrate_repository_client_side(
                 );
 
                 // Update repo progress
-                let mut repo_progress = RepoProgress::default();
-                repo_progress.export_complete = true;
-                repo_progress.car_size = car_size;
+                let repo_progress = RepoProgress {
+                    export_complete: true,
+                    car_size,
+                    ..Default::default()
+                };
                 dispatch.call(MigrationAction::SetRepoProgress(repo_progress));
 
                 response.car_data.unwrap_or_default()
@@ -664,8 +666,10 @@ async fn migrate_preferences_client_side(
                 console::info!("[Migration] Preferences exported successfully");
 
                 // Update preferences progress
-                let mut prefs_progress = PreferencesProgress::default();
-                prefs_progress.export_complete = true;
+                let prefs_progress = PreferencesProgress {
+                    export_complete: true,
+                    ..Default::default()
+                };
                 dispatch.call(MigrationAction::SetPreferencesProgress(prefs_progress));
 
                 response.preferences_json.unwrap_or_default()
@@ -729,8 +733,10 @@ async fn setup_plc_transition_client_side(
                 console::info!("[Migration] PLC recommendation retrieved successfully");
 
                 // Update PLC progress
-                let mut plc_progress = PlcProgress::default();
-                plc_progress.recommendation_complete = true;
+                let plc_progress = PlcProgress {
+                    recommendation_complete: true,
+                    ..Default::default()
+                };
                 dispatch.call(MigrationAction::SetPlcProgress(plc_progress));
 
                 // Update migration progress
@@ -918,19 +924,14 @@ async fn get_migration_checkpoint(session: &ClientSessionCredentials) -> Result<
                 return Err("Failed to get account status".to_string());
             }
 
-            // Use account status fields to determine checkpoint
-            let repo_blocks = response.repo_blocks.unwrap_or(0);
-            let expected_blobs = response.expected_blobs.unwrap_or(0);
-            let imported_blobs = response.imported_blobs.unwrap_or(0);
-            
-            // Determine checkpoint based on migration state
-            if expected_blobs > 0 && imported_blobs >= expected_blobs {
+            // Use helper functions to determine checkpoint
+            if is_blobs_migrated(session).await {
                 // All blobs imported, check if preferences are done
                 Ok(MigrationCheckpoint::PreferencesMigrated)
-            } else if expected_blobs > 0 && imported_blobs > 0 {
+            } else if response.expected_blobs.unwrap_or(0) > 0 && response.imported_blobs.unwrap_or(0) > 0 {
                 // Some blobs imported, continue blob migration
                 Ok(MigrationCheckpoint::BlobsMigrated)
-            } else if repo_blocks > 2 {
+            } else if is_repo_migrated(session).await {
                 // Repository migrated, need blob migration
                 Ok(MigrationCheckpoint::RepoMigrated)
             } else {

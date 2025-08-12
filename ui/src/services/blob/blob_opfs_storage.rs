@@ -43,64 +43,109 @@ pub struct OpfsBlobManager {
 
 impl OpfsBlobManager {
     pub async fn new() -> Result<Self, OpfsError> {
-        console::info!("Initializing OPFS blob manager");
+        console::info!("[OpfsBlobManager] 🚀 Initializing OPFS blob manager");
+        
+        console::debug!("[OpfsBlobManager] 📁 Accessing app-specific directory...");
         let app_dir = app_specific_dir()
             .await
-            .map_err(OpfsError::from_opfs_error)?;
+            .map_err(|e| {
+                console::error!("[OpfsBlobManager] ❌ Failed to access app-specific directory: {}", format!("{:?}", e));
+                OpfsError::from_opfs_error(e)
+            })?;
+        console::debug!("[OpfsBlobManager] ✅ App-specific directory accessed successfully");
+        
+        console::debug!("[OpfsBlobManager] 📁 Creating/accessing migration_blobs directory...");
         let options = GetDirectoryHandleOptions { create: true };
         let blob_dir = app_dir
             .get_directory_handle_with_options("migration_blobs", &options)
             .await
-            .map_err(OpfsError::from_opfs_error)?;
-        console::info!("OPFS blob directory created/accessed");
+            .map_err(|e| {
+                console::error!("[OpfsBlobManager] ❌ Failed to create/access migration_blobs directory: {}", format!("{:?}", e));
+                OpfsError::from_opfs_error(e)
+            })?;
+        
+        console::info!("[OpfsBlobManager] ✅ OPFS blob directory created/accessed successfully");
         Ok(Self { blob_dir })
     }
 
     pub async fn store_blob(&self, cid: &str, data: Vec<u8>) -> Result<(), OpfsError> {
-        console::info!("Storing blob {} ({} bytes)", cid, data.len().to_string());
+        console::info!("[OpfsBlobManager] 💾 Storing blob {} ({} bytes)", cid, data.len());
+        
+        console::debug!("[OpfsBlobManager] 📝 Creating file handle for blob {}", cid);
         let options = GetFileHandleOptions { create: true };
         let mut file = self
             .blob_dir
             .get_file_handle_with_options(cid, &options)
             .await
-            .map_err(OpfsError::from_opfs_error)?;
+            .map_err(|e| {
+                console::error!("[OpfsBlobManager] ❌ Failed to create file handle for blob {}: {}", cid, format!("{:?}", e));
+                OpfsError::from_opfs_error(e)
+            })?;
 
+        console::debug!("[OpfsBlobManager] ✍️ Creating writable stream for blob {}", cid);
         let write_options = CreateWritableOptions {
             keep_existing_data: false,
         };
         let mut writer = file
             .create_writable_with_options(&write_options)
             .await
-            .map_err(OpfsError::from_opfs_error)?;
+            .map_err(|e| {
+                console::error!("[OpfsBlobManager] ❌ Failed to create writable stream for blob {}: {}", cid, format!("{:?}", e));
+                OpfsError::from_opfs_error(e)
+            })?;
 
+        console::debug!("[OpfsBlobManager] ⬆️ Writing {} bytes to blob {}", data.len(), cid);
         writer
             .write_at_cursor_pos(data)
             .await
-            .map_err(OpfsError::from_opfs_error)?;
-        writer.close().await.map_err(OpfsError::from_opfs_error)?;
-        console::info!("Blob {} stored successfully", cid);
+            .map_err(|e| {
+                console::error!("[OpfsBlobManager] ❌ Failed to write data to blob {}: {}", cid, format!("{:?}", e));
+                OpfsError::from_opfs_error(e)
+            })?;
+            
+        console::debug!("[OpfsBlobManager] 🔒 Closing writer for blob {}", cid);
+        writer.close().await.map_err(|e| {
+            console::error!("[OpfsBlobManager] ❌ Failed to close writer for blob {}: {}", cid, format!("{:?}", e));
+            OpfsError::from_opfs_error(e)
+        })?;
+        
+        console::info!("[OpfsBlobManager] ✅ Blob {} stored successfully", cid);
         Ok(())
     }
 
     pub async fn retrieve_blob(&self, cid: &str) -> Result<Vec<u8>, OpfsError> {
-        console::info!("Retrieving blob {}", cid);
+        console::info!("[OpfsBlobManager] 📖 Retrieving blob {}", cid);
+        
+        console::debug!("[OpfsBlobManager] 🔍 Looking for file handle for blob {}", cid);
         let options = GetFileHandleOptions { create: false };
         let file = self
             .blob_dir
             .get_file_handle_with_options(cid, &options)
             .await
-            .map_err(|_| OpfsError::NotFound(format!("Blob {} not found", cid)))?;
-        let data = file.read().await.map_err(OpfsError::from_opfs_error)?;
-        console::info!("Blob {} retrieved ({} bytes)", cid, data.len().to_string());
+            .map_err(|e| {
+                console::warn!("[OpfsBlobManager] ⚠️ Blob {} not found: {}", cid, format!("{:?}", e));
+                OpfsError::NotFound(format!("Blob {} not found", cid))
+            })?;
+            
+        console::debug!("[OpfsBlobManager] 📥 Reading data from blob {}", cid);
+        let data = file.read().await.map_err(|e| {
+            console::error!("[OpfsBlobManager] ❌ Failed to read blob {}: {}", cid, format!("{:?}", e));
+            OpfsError::from_opfs_error(e)
+        })?;
+        
+        console::info!("[OpfsBlobManager] ✅ Blob {} retrieved successfully ({} bytes)", cid, data.len());
         Ok(data)
     }
 
     pub async fn has_blob(&self, cid: &str) -> bool {
+        console::debug!("[OpfsBlobManager] 🔍 Checking if blob {} exists", cid);
         let options = GetFileHandleOptions { create: false };
-        self.blob_dir
+        let exists = self.blob_dir
             .get_file_handle_with_options(cid, &options)
             .await
-            .is_ok()
+            .is_ok();
+        console::debug!("[OpfsBlobManager] 📋 Blob {} existence check result: {}", cid, exists);
+        exists
     }
 
     pub async fn get_storage_usage(&self) -> Result<u64, OpfsError> {

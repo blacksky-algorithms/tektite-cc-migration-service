@@ -473,39 +473,57 @@ pub async fn check_storage_quota() -> Result<u64, BlobError> {
 }
 
 /// Helper function to create a BlobManager instance with smart fallback
-/// Tries OPFS first (best performance), falls back to chunked LocalStorage if OPFS fails
+/// Follows the fallback order: OPFS -> IndexedDB -> LocalStorage
+/// Each fallback provides progressively better compatibility but potentially worse performance
 pub async fn create_blob_manager() -> Result<Box<dyn crate::services::blob::blob_manager_trait::BlobManagerTrait>, String> {
     use crate::services::blob::blob_opfs_storage::OpfsBlobManager;
+    use crate::services::blob::blob_idb_storage::IdbBlobManager;
     use crate::services::blob::blob_manager_trait::BlobManagerTrait;
     
+    console::info!("[create_blob_manager] 🔄 Initializing blob storage with fallback chain: OPFS -> IndexedDB -> LocalStorage");
+    
     // Try OPFS first (best performance for large files)
+    console::debug!("[create_blob_manager] 🏃 Attempting to initialize OPFS storage...");
     match OpfsBlobManager::new().await {
         Ok(manager) => {
-            console::info!("✅ Using OPFS for blob storage");
+            console::info!("✅ [create_blob_manager] Using OPFS for blob storage (optimal performance)");
             Ok(Box::new(manager) as Box<dyn BlobManagerTrait>)
         }
         Err(opfs_error) => {
-            // Check if it's a security error (common in development)
             let error_msg = format!("{}", opfs_error);
             if error_msg.contains("SecurityError") || error_msg.contains("Security error") {
-                console::warn!("⚠️ OPFS not available (security restriction), falling back to chunked LocalStorage");
+                console::warn!("⚠️ [create_blob_manager] OPFS not available (security restriction), trying IndexedDB...");
             } else {
-                console::warn!("⚠️ OPFS failed ({}), falling back to chunked LocalStorage", error_msg);
+                console::warn!("⚠️ [create_blob_manager] OPFS failed ({}), trying IndexedDB...", error_msg);
             }
             
-            // Fall back to enhanced LocalStorage with chunking for larger blobs
-            match BlobManager::new().await {
+            // Try IndexedDB as second choice (good balance of performance and compatibility)
+            console::debug!("[create_blob_manager] 🏃 Attempting to initialize IndexedDB storage...");
+            match IdbBlobManager::new().await {
                 Ok(manager) => {
-                    console::info!("✅ Using chunked LocalStorage for blob storage (may have size limitations)");
+                    console::info!("✅ [create_blob_manager] Using IndexedDB for blob storage (good performance, wide compatibility)");
                     Ok(Box::new(manager) as Box<dyn BlobManagerTrait>)
                 }
-                Err(ls_error) => {
-                    let error_msg = format!(
-                        "Both OPFS and LocalStorage failed: OPFS({}), LocalStorage({})", 
-                        opfs_error, ls_error
-                    );
-                    console::error!("[create_blob_manager] {}", error_msg.clone());
-                    Err(error_msg)
+                Err(idb_error) => {
+                    let idb_error_msg = format!("{}", idb_error);
+                    console::warn!("⚠️ [create_blob_manager] IndexedDB failed ({}), falling back to LocalStorage...", idb_error_msg);
+                    
+                    // Final fallback to LocalStorage (most compatible but most limited)
+                    console::debug!("[create_blob_manager] 🏃 Attempting to initialize LocalStorage...");
+                    match BlobManager::new().await {
+                        Ok(manager) => {
+                            console::info!("✅ [create_blob_manager] Using LocalStorage for blob storage (limited size, maximum compatibility)");
+                            Ok(Box::new(manager) as Box<dyn BlobManagerTrait>)
+                        }
+                        Err(ls_error) => {
+                            let error_msg = format!(
+                                "All storage backends failed - OPFS({}), IndexedDB({}), LocalStorage({})", 
+                                opfs_error, idb_error, ls_error
+                            );
+                            console::error!("❌ [create_blob_manager] {}", error_msg.clone());
+                            Err(error_msg)
+                        }
+                    }
                 }
             }
         }
@@ -530,14 +548,13 @@ where
         format!("{}", total_bytes)
     );
 
-    let mut processed_blobs = 0;
     let mut processed_bytes = 0;
 
-    for (cid, data) in blobs {
+    for (processed_blobs, (cid, data)) in blobs.into_iter().enumerate() {
         // Update progress
         progress_callback(BlobProgress {
             total_blobs,
-            processed_blobs,
+            processed_blobs: processed_blobs as u32,
             total_bytes,
             processed_bytes,
             current_blob_cid: Some(cid.clone()),
@@ -548,13 +565,12 @@ where
         manager.store_blob_with_retry(&cid, data.clone()).await?;
 
         // Update counters
-        processed_blobs += 1;
         processed_bytes += data.len() as u64;
 
         // Final progress update for this blob
         progress_callback(BlobProgress {
             total_blobs,
-            processed_blobs,
+            processed_blobs: (processed_blobs + 1) as u32,
             total_bytes,
             processed_bytes,
             current_blob_cid: Some(cid),
