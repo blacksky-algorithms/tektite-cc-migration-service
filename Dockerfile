@@ -20,7 +20,7 @@ ENV PATH="/.cargo/bin:$PATH"
 RUN dx bundle --platform web --package web
 
 # Use nginx to serve static files
-FROM nginx:alpine AS runtime
+FROM nginx:1.27-bookworm AS runtime
 
 # Remove default nginx config and html
 RUN rm -rf /etc/nginx/conf.d/default.conf /usr/share/nginx/html/*
