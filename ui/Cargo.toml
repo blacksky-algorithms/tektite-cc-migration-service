@@ -1,0 +1,41 @@
+[package]
+name = "ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dioxus = { workspace = true }
+gloo-storage = "0.3"
+# web-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# dioxus-logger = "0.5"
+gloo-console = "0.3"
+base64 = "0.22"
+opfs ={ version = "0.1.3", optional = true }
+# wasm-bindgen = { version = "0.2", optional = true }
+# wasm-bindgen-futures = { version = "0.4", optional = true }
+
+# Client-side HTTP and DNS - WASM compatible
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+async-trait = "0.1.88"
+anyhow = "1.0"
+lru = "0.12"
+
+# Additional web APIs for enhanced client functionality
+js-sys = "0.3"
+tracing = "0.1"
+
+# Conditional tokio features for WASM vs native
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1.0", features = ["macros", "sync"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.0", features = ["macros", "rt", "sync"] }
+
+[features]
+default = ["web"]
+web = ["dep:opfs"]
+
+# web = ["dep:opfs", "dep:wasm-bindgen", "dep:wasm-bindgen-futures"]
+# web = []
