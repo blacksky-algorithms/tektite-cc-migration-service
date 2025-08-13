@@ -77,6 +77,7 @@ pub fn MigrationService() -> Element {
                     class: "recommendation-list",
                     li { "📱➡️💻 Use a laptop or desktop computer for the best experience" }
                     li { "🌐 Use Chrome or a Chromium-based browser for optimal compatibility" }
+                    li { "🔐 If you have 2FA enable, please disable it before migration" }
                     li { "📶 If using a mobile device, ensure you have a stable Wi-Fi connection" }
                     li { "⚠️ Use this tool at your own risk - we are not liable for any data loss" }
                 }

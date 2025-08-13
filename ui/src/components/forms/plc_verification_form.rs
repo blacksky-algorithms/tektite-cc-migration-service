@@ -307,6 +307,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                                 li { "Verify your posts and follows are intact" }
                                 li { "Your old account has been deactivated" }
                                 li { "If you see an invalid handle error, please make a post/skeet with your new handle @{handle}" }
+                                li { "Re-enable 2FA is recommended" }
                                 li { "You might see an invalid handle warning for about 20 minutes. This is a feature with the PDS servers." }
                             }
                         }
