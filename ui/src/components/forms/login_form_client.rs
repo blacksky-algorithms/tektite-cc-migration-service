@@ -48,7 +48,7 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
 
             h2 {
                 class: "form-title",
-                "Step 1: Login to Current PDS (Client-Side)"
+                "Step 1: Login to Current PDS"
             }
 
             // Handle/DID Input Section
@@ -259,7 +259,7 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                     } else if state().session_stored() {
                         "Session Stored ✓"
                     } else {
-                        "Login (Client-Side)"
+                        "Login"
                     }
                 }
             }
@@ -272,12 +272,12 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                         class: "result-message",
                         if result.success { "✓ {result.message}" } else { "✗ {result.message}" }
                     }
-                    if result.success && state().session_stored() {
-                        div {
-                            class: "session-success-notice",
-                            "✓ Login successful (Client-Side DNS-over-HTTPS)"
-                        }
-                    }
+                    // if result.success && state().session_stored() {
+                    //     div {
+                    //         class: "session-success-notice",
+                    //         "✓ Login successful (Client-Side DNS-over-HTTPS)"
+                    //     }
+                    // }
                 }
             }
         }
