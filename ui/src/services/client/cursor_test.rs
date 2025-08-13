@@ -86,11 +86,10 @@ mod tests {
         ];
 
         for (input_cursor, expected_output, should_break) in test_cases {
-            let mut cursor = None;
             let mut loop_should_break = false;
 
             // Simulate the cursor update logic from our pagination code
-            cursor = if let Some(next_cursor) = input_cursor {
+            let mut cursor = if let Some(next_cursor) = input_cursor {
                 if !next_cursor.is_empty() {
                     Some(next_cursor) // Continue with next cursor
                 } else {

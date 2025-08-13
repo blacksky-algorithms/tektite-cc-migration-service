@@ -120,6 +120,12 @@ impl RetryConfig {
     }
 }
 
+impl Default for MigrationConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MigrationConfig {
     /// Create a new configuration with conservative defaults for wasm32-unknown-unknown
     pub fn new() -> Self {

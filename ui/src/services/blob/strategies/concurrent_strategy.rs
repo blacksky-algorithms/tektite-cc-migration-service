@@ -106,7 +106,7 @@ impl ProgressTracker {
             // - Always update for first 10 blobs (important for early feedback)
             if processed == 1 || 
                elapsed_millis >= 100 || 
-               processed % 5 == 0 ||
+               processed.is_multiple_of(5) ||
                processed <= 10 {
                 console::debug!("[ProgressTracker] Triggering UI update: processed={}, elapsed={}ms", format_number(processed), format_number(elapsed_millis));
                 *last_update = now;

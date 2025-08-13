@@ -20,6 +20,7 @@ pub struct PlcVerificationFormProps {
 pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
     let state = props.state;
     let dispatch = props.dispatch;
+    let handle = format!("{}{}",state().get_handle_prefix(),state().get_domain_suffix());
 
     rsx! {
         div {
@@ -305,6 +306,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                                 li { "Update your handle in any external applications" }
                                 li { "Verify your posts and follows are intact" }
                                 li { "Your old account has been deactivated" }
+                                li { "If you see an invalid handle error, please make a post/skeet with your new handle @{handle}" }
                             }
                         }
                     }

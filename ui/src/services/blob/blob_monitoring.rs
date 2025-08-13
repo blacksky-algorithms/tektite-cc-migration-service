@@ -66,7 +66,7 @@ pub enum TrendDirection {
     Growing,
     Stable,
     Decreasing,
-    Insufficient_Data,
+    InsufficientData,
 }
 
 impl std::fmt::Display for TrendDirection {
@@ -75,7 +75,7 @@ impl std::fmt::Display for TrendDirection {
             TrendDirection::Growing => write!(f, "Growing"),
             TrendDirection::Stable => write!(f, "Stable"),
             TrendDirection::Decreasing => write!(f, "Decreasing"),
-            TrendDirection::Insufficient_Data => write!(f, "Insufficient Data"),
+            TrendDirection::InsufficientData => write!(f, "Insufficient Data"),
         }
     }
 }
@@ -258,7 +258,7 @@ impl StorageMonitor {
                 days_until_full: None,
                 confidence_level: 0.0,
                 recommended_action: "Continue monitoring - insufficient data for prediction".to_string(),
-                trend_direction: TrendDirection::Insufficient_Data,
+                trend_direction: TrendDirection::InsufficientData,
                 growth_rate_bytes_per_day: 0.0,
             });
         }
@@ -311,7 +311,7 @@ impl StorageMonitor {
             },
             TrendDirection::Decreasing => "Storage usage is decreasing - continue current practices".to_string(),
             TrendDirection::Stable => "Storage usage is stable - no immediate action needed".to_string(),
-            TrendDirection::Insufficient_Data => "Continue monitoring to gather more data for accurate predictions".to_string(),
+            TrendDirection::InsufficientData => "Continue monitoring to gather more data for accurate predictions".to_string(),
         };
 
         console::info!("🔮 [StorageMonitor] Capacity prediction: {} trend, {:.1} MB/day growth, {} confidence", 

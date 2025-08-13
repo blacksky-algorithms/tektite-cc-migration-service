@@ -42,7 +42,7 @@ jobs:
         run: |
           if ! command -v dx &> /dev/null; then
             echo "Installing Dioxus CLI..."
-            cargo install dioxus-cli --version 0.5.7
+            cargo install dioxus-cli
           else
             echo "Dioxus CLI already installed: $(dx --version)"
           fi
@@ -50,33 +50,25 @@ jobs:
       - name: Build for GitHub Pages
         run: |
           echo "Building Dioxus web application..."
-          # Use BUILD command with correct flags and verbose output
-          dx build --platform web --package web --release --verbose
+          dx build --platform web -p web --release --verbose
           
-          echo "Build complete. Checking output directory..."
-          # The output should be in dist/ for web platform builds
-          ls -la ./dist/ || echo "dist/ directory not found, checking alternatives..."
-          ls -la ./target/dx/ || echo "No dx target directory"
-          find . -name "index.html" -type f 2>/dev/null | head -10
+          echo "Build completed successfully!"
+          echo "Checking output directory..."
+          ls -la ./target/dx/web/release/web/public/
         
       - name: Create CNAME file for custom domain
         run: |
-          # Dioxus web builds output to ./dist/ directory
-          if [ -d "./dist" ]; then
-            echo "tektite.cc" > ./dist/CNAME
-            echo "Created CNAME file in ./dist/"
-          else
-            echo "Warning: dist directory not found, searching for output..."
-            find . -type d -name "dist" -o -name "public" 2>/dev/null
-          fi
+          echo "tektite.cc" > ./target/dx/web/release/web/public/CNAME
+          echo "Created CNAME file for custom domain: tektite.cc"
           
       - name: Add 404 page for SPA routing
         run: |
-          if [ -f "./dist/index.html" ]; then
-            cp ./dist/index.html ./dist/404.html
+          # Copy index.html to 404.html for client-side routing support
+          if [ -f "./target/dx/web/release/web/public/index.html" ]; then
+            cp ./target/dx/web/release/web/public/index.html ./target/dx/web/release/web/public/404.html
             echo "Created 404.html for SPA routing"
           else
-            echo "index.html not found in dist/"
+            echo "Warning: index.html not found"
           fi
         
       - name: Setup Pages
@@ -85,8 +77,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Dioxus web platform builds output to dist/
-          path: ./dist
+          path: ./target/dx/web/release/web/public
 
   deploy:
     environment:

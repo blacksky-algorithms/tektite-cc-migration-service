@@ -350,10 +350,10 @@ fn determine_provider_from_pds_endpoint(pds_endpoint: &str) -> ClientPdsProvider
 /// Extract hostname from URL using simple string parsing
 fn extract_hostname_from_url(url: &str) -> String {
     // Handle https:// and http:// prefixes
-    let url = if url.starts_with("https://") {
-        &url[8..]
-    } else if url.starts_with("http://") {
-        &url[7..]
+    let url = if let Some(stripped) = url.strip_prefix("https://") {
+        stripped
+    } else if let Some(stripped) = url.strip_prefix("http://") {
+        stripped
     } else {
         url
     };
