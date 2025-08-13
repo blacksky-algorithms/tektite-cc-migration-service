@@ -446,18 +446,27 @@ impl PdsClient {
         }
     }
 
-    /// Resolve PDS URL from DID (placeholder implementation)
+    /// Resolve PDS URL from DID by resolving the DID document
     async fn resolve_pds_from_did(&self, did: &str) -> Result<String, ClientError> {
-        // For now, use a simplified approach based on DID method
-        if did.starts_with("did:plc:") {
-            // PLC DIDs typically use plc.directory to resolve DID documents
-            // This is a placeholder - in production, you'd resolve the full DID document
-            Ok("https://bsky.social".to_string()) // Default to Bluesky for now
-        } else if did.starts_with("did:web:") {
-            // Web DIDs encode the domain in the DID
-            let domain = did.strip_prefix("did:web:").unwrap_or("");
-            Ok(format!("https://{}", domain))
+        info!("Resolving PDS URL from DID: {}", did);
+        
+        // Handle different DID methods
+        if did.starts_with("did:plc:") || did.starts_with("did:web:") {
+            // Use the identity resolver to get the PDS endpoint from the DID document
+            match self.identity_resolver.resolve_did_to_pds_endpoint(did).await {
+                Ok(pds_url) => {
+                    info!("Resolved DID {} to PDS: {}", did, pds_url);
+                    Ok(pds_url)
+                }
+                Err(e) => {
+                    error!("Failed to resolve DID {} to PDS endpoint: {}", did, e);
+                    // Convert ResolveError to ClientError
+                    Err(ClientError::ResolutionFailed(e))
+                }
+            }
         } else {
+            // Fallback for unsupported DID methods
+            error!("Unsupported DID method: {}", did);
             Err(ClientError::PdsOperationFailed {
                 operation: "resolve_pds".to_string(),
                 message: format!("Unsupported DID method: {}", did),
@@ -1341,17 +1350,27 @@ mod tests {
     async fn test_resolve_pds_from_did() {
         let client = PdsClient::new();
         
-        // Test PLC DID
-        let pds_url = client.resolve_pds_from_did("did:plc:abcd1234").await.unwrap();
-        assert_eq!(pds_url, "https://bsky.social");
+        // Test PLC DID - This should now try to resolve the actual DID document
+        // Since "did:plc:abcd1234" is a fake DID, it will fail resolution
+        // This is the correct behavior - we no longer hardcode bsky.social
+        let result = client.resolve_pds_from_did("did:plc:abcd1234").await;
+        assert!(result.is_err(), "Fake DID should fail resolution");
         
-        // Test Web DID
-        let pds_url = client.resolve_pds_from_did("did:web:example.com").await.unwrap();
-        assert_eq!(pds_url, "https://example.com");
+        // Test Web DID - This should also fail since the domain doesn't exist
+        let result = client.resolve_pds_from_did("did:web:fake-nonexistent-domain.com").await;
+        assert!(result.is_err(), "Fake web DID should fail resolution");
         
-        // Test unsupported DID
+        // Test unsupported DID method
         let result = client.resolve_pds_from_did("did:unknown:test").await;
-        assert!(result.is_err());
+        assert!(result.is_err(), "Unsupported DID method should fail");
+        
+        // The error should be PdsOperationFailed for unsupported methods
+        match result {
+            Err(ClientError::PdsOperationFailed { operation, message: _ }) => {
+                assert_eq!(operation, "resolve_pds");
+            }
+            _ => panic!("Expected PdsOperationFailed error for unsupported DID method"),
+        }
     }
 
     // Note: Integration tests with real PDS endpoints would require valid credentials

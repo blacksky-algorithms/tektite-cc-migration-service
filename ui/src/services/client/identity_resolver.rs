@@ -455,6 +455,29 @@ impl WebIdentityResolver {
         let parts: Vec<&str> = did.split(':').collect();
         parts.len() >= 3 && !parts[1].is_empty() && !parts[2].is_empty()
     }
+
+    /// Resolve DID to PDS endpoint URL
+    pub async fn resolve_did_to_pds_endpoint(&self, did: &str) -> Result<String, ResolveError> {
+        info!("Resolving DID to PDS endpoint: {}", did);
+        
+        // Resolve the DID document
+        let did_document = resolve_did_document(did, &self.http_client).await?;
+        
+        // Extract PDS endpoints from the DID document
+        let pds_endpoints = did_document.pds_endpoints();
+        info!("Found {} PDS endpoints for {}: {:?}", pds_endpoints.len(), did, pds_endpoints);
+        
+        if pds_endpoints.is_empty() {
+            return Err(ResolveError::NoDIDsFound { 
+                domain: format!("No PDS endpoints found in DID document for {}", did) 
+            });
+        }
+        
+        // Return the first PDS endpoint
+        let pds_endpoint = &pds_endpoints[0];
+        info!("Using PDS endpoint for {}: {}", did, pds_endpoint);
+        Ok(pds_endpoint.clone())
+    }
 }
 
 impl Default for WebIdentityResolver {
