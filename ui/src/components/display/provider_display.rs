@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use crate::services::client::ClientPdsProvider;
 
 const BLUESKY_LOGO: Asset = asset!("/assets/img/bluesky_logo.svg");
-const BLACKSKY_LOGO: Asset = asset!("/assets/img/blacksky_icon.svg");
+const BLACKSKY_LOGO: Asset = asset!("/assets/img/blacksky_logo.svg");
 
 #[derive(Props, PartialEq, Clone)]
 pub struct ProviderDisplayProps {
