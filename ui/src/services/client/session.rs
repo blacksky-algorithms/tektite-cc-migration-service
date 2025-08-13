@@ -24,6 +24,7 @@ fn current_time_secs() -> u64 {
 
 use super::types::ClientSessionCredentials;
 use super::errors::ClientError;
+use crate::features::migration::types::MigrationProgress;
 
 /// Session manager for secure credential storage and management
 pub struct SessionManager {
@@ -134,6 +135,49 @@ impl SessionManager {
             self.store_session(&session)?;
             info!("Session tokens updated for DID: {}", session.did);
         }
+        Ok(())
+    }
+
+    /// Store migration progress for a DID
+    pub fn store_migration_progress(&self, did: &str, progress: &MigrationProgress) -> Result<(), ClientError> {
+        let storage_key = format!("migration_progress_{}", did);
+        let progress_json = serde_json::to_string(progress)
+            .map_err(|e| ClientError::SerializationError {
+                message: format!("Failed to serialize migration progress: {}", e),
+            })?;
+
+        // Always use localStorage for migration progress (needs persistence across sessions)
+        LocalStorage::set(&storage_key, progress_json)
+            .map_err(|e| ClientError::StorageError {
+                message: format!("Failed to store migration progress: {:?}", e),
+            })?;
+
+        info!("Migration progress stored for DID: {}", did);
+        Ok(())
+    }
+
+    /// Get migration progress for a DID
+    pub fn get_migration_progress(&self, did: &str) -> Result<Option<MigrationProgress>, ClientError> {
+        let storage_key = format!("migration_progress_{}", did);
+        
+        let progress_json = match LocalStorage::get::<String>(&storage_key) {
+            Ok(json) => json,
+            Err(_) => return Ok(None),
+        };
+
+        let progress: MigrationProgress = serde_json::from_str(&progress_json)
+            .map_err(|e| ClientError::SerializationError {
+                message: format!("Failed to deserialize migration progress: {}", e),
+            })?;
+
+        Ok(Some(progress))
+    }
+
+    /// Clear migration progress for a DID
+    pub fn clear_migration_progress(&self, did: &str) -> Result<(), ClientError> {
+        let storage_key = format!("migration_progress_{}", did);
+        LocalStorage::delete(&storage_key);
+        info!("Migration progress cleared for DID: {}", did);
         Ok(())
     }
 }

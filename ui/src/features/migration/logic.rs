@@ -5,6 +5,7 @@
 use crate::services::client::{
     ClientAccountStatusResponse, ClientCreateAccountRequest, ClientSessionCredentials, JwtUtils, MigrationClient, PdsClient
 };
+use crate::services::blob::blob_migration::smart_blob_migration;
 // use reqwest::Client;
 use dioxus::prelude::*;
 use gloo_console as console;
@@ -31,7 +32,7 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
             session
         }
         Err(error) => {
-            console::error!("[Migration] Failed to get old PDS session:", format!("{:?}", error));
+            console::error!("[Migration] Failed to get old PDS session: {}", error.to_string());
             dispatch.call(MigrationAction::SetMigrationError(Some("Failed to get old PDS session from storage".to_string())));
             dispatch.call(MigrationAction::SetMigrating(false));
             return;
@@ -61,7 +62,9 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
         return;
     }
 
+    // NEWBOLD.md Step: goat pds describe $NEWPDSHOST (line 11)
     // Get target PDS DID by calling the describe server endpoint
+    // This implements: goat pds describe https://bsky.social
     dispatch.call(MigrationAction::SetMigrationStep("Getting target PDS information...".to_string()));
     
     let target_pds_did = match migration_client.pds_client.describe_server(&target_pds_url).await {
@@ -84,12 +87,14 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
         }
     };
 
+    // NEWBOLD.md Step: goat account service-auth --lxm com.atproto.server.createAccount --aud $NEWPDSSERVICEDID --duration-sec 3600 (line 33)
     // Step 3: Generate service auth token for DID ownership proof
     console::info!("[Migration] Step 3: Generating service auth token for DID ownership");
     dispatch.call(MigrationAction::SetMigrationStep("Generating service auth token...".to_string()));
     
     // Request a service auth token from the old PDS
     // This is a JWT that proves we own the DID and can migrate it
+    // Implements: goat account service-auth --lxm com.atproto.server.createAccount --aud $NEWPDSSERVICEDID --duration-sec 3600
     let service_auth_token = match request_service_auth_token(&migration_client, &old_session, &target_pds_did).await {
         Ok(token) => {
             console::info!("[Migration] Service auth token generated successfully");
@@ -110,7 +115,9 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
     // Derive PDS URL for login attempt
     let new_pds_url = migration_client.pds_client.derive_pds_url_from_handle(&state.form3.handle);
 
+    // NEWBOLD.md Step: goat account login --pds-host $NEWPDSHOST -u $ACCOUNTDID -p $NEWPASSWORD (line 52)
     // Try to login first to check if account already exists
+    // Implements: goat account login --pds-host $NEWPDSHOST -u $ACCOUNTDID -p $NEWPASSWORD
     let login_result = migration_client.pds_client.try_login_before_creation(
         &state.form3.handle,
         &state.form3.password,
@@ -144,7 +151,7 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
                                 
                                 // Store the existing session and resume from appropriate step
                                 if let Err(error) = LocalStorageManager::store_client_session_as_new(&existing_session) {
-                                    console::warn!("[Migration] Failed to store existing session:", format!("{:?}", error));
+                                    console::warn!("[Migration] Failed to store existing session: {}", error.to_string());
                                 }
                                 dispatch.call(MigrationAction::SetNewPdsSession(Some(convert_to_api_session(&existing_session))));
                                 
@@ -249,7 +256,7 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
     // Step 5: Store new PDS session in localStorage
     console::info!("[Migration] Step 5: Storing new PDS session in localStorage");
     if let Err(error) = LocalStorageManager::store_client_session_as_new(&new_session) {
-        console::warn!("[Migration] Failed to store new PDS session:", format!("{:?}", error));
+        console::warn!("[Migration] Failed to store new PDS session: {}", error.to_string());
     }
     dispatch.call(MigrationAction::SetNewPdsSession(Some(convert_to_api_session(&new_session))));
 
@@ -287,8 +294,8 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
         return;
     }
 
-    // Execute blob migration
-    if let Err(error) = migrate_blobs_client_side(&old_session, &new_session, &dispatch, &state).await {
+    // Execute blob migration using smart migration strategy
+    if let Err(error) = execute_smart_blob_migration(&old_session, &new_session, &dispatch, &state).await {
         dispatch.call(MigrationAction::SetMigrationError(Some(error)));
         dispatch.call(MigrationAction::SetMigrating(false));
         return;
@@ -311,12 +318,14 @@ pub async fn execute_migration_client_side(state: MigrationState, dispatch: Even
     console::info!("[Migration] Client-side migration completed successfully");
 }
 
+/// NEWBOLD.md Step: goat account create --pds-host $NEWPDSHOST --existing-did $ACCOUNTDID --handle $NEWHANDLE --password $NEWPASSWORD --email $NEWEMAIL --invite-code $INVITECODE --service-auth $SERVICEAUTH (line 40-47)
 /// Create account using client-side operations (with fallback resumption logic)
 #[cfg(feature = "web")]
 async fn create_account_client_side(
     migration_client: &MigrationClient, 
     request: ClientCreateAccountRequest
 ) -> Result<ClientSessionCredentials, String> {
+    // Implements: goat account create --pds-host $NEWPDSHOST --existing-did $ACCOUNTDID --handle $NEWHANDLE --password $NEWPASSWORD --email $NEWEMAIL --invite-code $INVITECODE --service-auth $SERVICEAUTH
     match migration_client.create_account_new_pds(request.clone()).await {
         Ok(response) => {
             if response.success {
@@ -375,6 +384,8 @@ async fn migrate_repository_client_side(
 
     let pds_client = PdsClient::new();
     
+    // NEWBOLD.md Step: goat repo export $ACCOUNTDID (line 76)
+    // Implements: goat repo export $ACCOUNTDID
     let car_data = match pds_client.export_repository(old_session).await {
         Ok(response) => {
             if response.success {
@@ -401,11 +412,13 @@ async fn migrate_repository_client_side(
     };
 
     // Step 8: Import repository to new PDS
+    // NEWBOLD.md Step: goat repo import ./did:plc:do2ar6uqzrvyzq3wevji6fbe.20250625142552.car (line 81)
     console::info!("[Migration] Step 8: Importing repository to new PDS");
     dispatch.call(MigrationAction::SetMigrationStep(
         "Importing repository to new PDS...".to_string(),
     ));
 
+    // Implements: goat repo import ./did:plc:do2ar6uqzrvyzq3wevji6fbe.20250625142552.car
     match pds_client.import_repository(new_session, car_data).await {
         Ok(response) => {
             if response.success {
@@ -432,8 +445,9 @@ async fn migrate_repository_client_side(
 }
 
 /// Migrate blobs using client-side operations
+/// Enhanced blob migration using smart strategy selection
 #[cfg(feature = "web")]
-async fn migrate_blobs_client_side(
+async fn execute_smart_blob_migration(
     old_session: &ClientSessionCredentials,
     new_session: &ClientSessionCredentials,
     dispatch: &EventHandler<MigrationAction>,
@@ -447,202 +461,116 @@ async fn migrate_blobs_client_side(
 
     let pds_client = PdsClient::new();
 
-    let missing_blobs = match pds_client.get_missing_blobs(new_session, None, None).await {
-        Ok(response) => {
-            if response.success {
-                let blobs = response.missing_blobs.unwrap_or_default();
-                console::info!("[Migration] Found {} missing blobs", blobs.len());
+    // Collect all missing blobs using pagination (matching Go goat implementation)
+    let mut missing_blobs = Vec::new();
+    let mut cursor: Option<String> = None;
+    
+    loop {
+        console::debug!("[Migration] Fetching missing blobs batch with cursor: {:?}", format!("{:?}", cursor));
+        let current_cursor = cursor.clone();
+        match pds_client.get_missing_blobs(new_session, current_cursor, Some(500)).await {
+            Ok(response) => {
+                if response.success {
+                    let mut batch_blobs = response.missing_blobs.unwrap_or_default();
+                    console::debug!("[Migration] Received {} blobs in this batch", batch_blobs.len());
+                    missing_blobs.append(&mut batch_blobs);
 
-                // Update migration progress
-                let mut migration_progress = state.migration_progress.clone();
-                migration_progress.missing_blobs_checked = true;
-                migration_progress.total_blob_count = blobs.len() as u32;
-                dispatch.call(MigrationAction::SetMigrationProgress(migration_progress));
-
-                blobs
-            } else {
-                return Err(response.message);
+                    // Check for pagination continuation - matches Go goat pattern:
+                    // if resp.Cursor != nil && *resp.Cursor != ""
+                    cursor = if let Some(next_cursor) = response.cursor {
+                        if !next_cursor.is_empty() {
+                            Some(next_cursor) // Continue with next cursor
+                        } else {
+                            break; // Empty cursor means no more pages
+                        }
+                    } else {
+                        break; // No cursor means no more pages
+                    };
+                } else {
+                    return Err(response.message);
+                }
             }
+            Err(e) => return Err(format!("Failed to check missing blobs: {}", e)),
         }
-        Err(e) => return Err(format!("Failed to check missing blobs: {}", e)),
-    };
+    }
 
-    // Steps 10-13: Blob migration with OPFS
+    console::info!("[Migration] Found {} missing blobs across all pages", missing_blobs.len().to_string());
+
+    // Update migration progress
+    let mut migration_progress = state.migration_progress.clone();
+    migration_progress.missing_blobs_checked = true;
+    migration_progress.total_blob_count = missing_blobs.len() as u32;
+    dispatch.call(MigrationAction::SetMigrationProgress(migration_progress));
+
+    // Steps 10-13: Smart blob migration with intelligent fallback storage
     if !missing_blobs.is_empty() {
-        console::info!("[Migration] Steps 10-13: Starting blob migration process");
+        console::info!("[Migration] Steps 10-13: Starting smart blob migration with intelligent storage fallback");
         dispatch.call(MigrationAction::SetMigrationStep(
-            "Initializing OPFS blob storage...".to_string(),
+            "Initializing intelligent blob storage for smart migration...".to_string(),
         ));
 
-        // Initialize OPFS blob manager
-        let blob_manager = match crate::services::blob::blob_storage::create_blob_manager().await {
-            Ok(manager) => manager,
+        // Initialize intelligent fallback blob manager
+        let mut blob_manager = match crate::services::blob::blob_fallback_manager::create_fallback_blob_manager().await {
+            Ok(manager) => {
+                let (backend_name, backend_description) = manager.get_active_backend_info();
+                console::info!("[Migration] Blob storage initialized with {} backend", backend_name);
+                console::info!("[Migration] Backend details: {}", backend_description);
+                manager
+            },
             Err(e) => {
                 return Err(format!(
-                    "Failed to initialize blob storage: {}",
+                    "Failed to initialize blob storage (all backends failed): {}",
                     e
                 ))
             }
         };
 
-        // Download and store blobs
-        console::info!(
-            "[Migration] Step 10-11: Downloading {} blobs to OPFS",
-            missing_blobs.len()
-        );
-        let mut downloaded_blobs = Vec::new();
-        let mut total_blob_bytes = 0u64;
+        // Use smart blob migration with intelligent strategy selection
+        console::info!("[Migration] Executing smart blob migration with {} blobs", missing_blobs.len().to_string());
+        match smart_blob_migration(
+            missing_blobs,
+            old_session.clone(),
+            new_session.clone(),
+            &mut blob_manager,
+            dispatch,
+        ).await {
+            Ok(result) => {
+                console::info!("[Migration] Smart blob migration completed successfully");
+                console::info!("[Migration] Results: {}/{} blobs uploaded, {} failed", 
+                              result.uploaded_blobs, result.total_blobs, result.failed_blobs.len());
+                
+                // Update final migration progress
+                let mut migration_progress = state.migration_progress.clone();
+                migration_progress.blobs_imported = true;
+                migration_progress.imported_blob_count = result.uploaded_blobs;
+                dispatch.call(MigrationAction::SetMigrationProgress(migration_progress));
 
-        for (index, missing_blob) in missing_blobs.iter().enumerate() {
-            dispatch.call(MigrationAction::SetMigrationStep(format!(
-                "Downloading blob {} of {} to OPFS...",
-                index + 1,
-                missing_blobs.len()
-            )));
-
-            // Update blob progress
-            let blob_progress = BlobProgress {
-                total_blobs: missing_blobs.len() as u32,
-                processed_blobs: index as u32,
-                total_bytes: total_blob_bytes,
-                processed_bytes: total_blob_bytes,
-                current_blob_cid: Some(missing_blob.cid.clone()),
-                current_blob_progress: Some(0.0),
-                error: None,
-            };
-            dispatch.call(MigrationAction::SetBlobProgress(blob_progress));
-
-            // Download blob from old PDS
-            match pds_client.export_blob(old_session, missing_blob.cid.clone()).await {
-                Ok(response) => {
-                    if response.success {
-                        let blob_data = response.blob_data.unwrap_or_default();
-                        let blob_size = blob_data.len() as u64;
-                        total_blob_bytes += blob_size;
-
-                        console::info!(
-                            "[Migration] Downloaded blob {} ({} bytes)",
-                            &missing_blob.cid,
-                            blob_size.to_string()
-                        );
-
-                        // Store blob in OPFS with retry logic
-                        match blob_manager
-                            .store_blob_with_retry(&missing_blob.cid, blob_data.clone())
-                            .await
-                        {
-                            Ok(()) => {
-                                console::info!(
-                                    "[Migration] Stored blob {} in OPFS",
-                                    &missing_blob.cid
-                                );
-                            }
-                            Err(e) => {
-                                return Err(format!("Failed to store blob in OPFS: {}", e));
-                            }
-                        }
-
-                        downloaded_blobs.push((missing_blob.cid.clone(), blob_data));
-
-                        // Update blob progress
-                        let blob_progress = BlobProgress {
-                            total_blobs: missing_blobs.len() as u32,
-                            processed_blobs: (index + 1) as u32,
-                            total_bytes: total_blob_bytes,
-                            processed_bytes: total_blob_bytes,
-                            current_blob_cid: Some(missing_blob.cid.clone()),
-                            current_blob_progress: Some(100.0),
-                            error: None,
-                        };
-                        dispatch.call(MigrationAction::SetBlobProgress(blob_progress));
-                    } else {
-                        return Err(format!("Failed to download blob: {}", response.message));
+                if !result.failed_blobs.is_empty() {
+                    console::warn!("[Migration] Some blobs failed to migrate: {} failures", result.failed_blobs.len().to_string());
+                    for failure in &result.failed_blobs {
+                        console::warn!("[Migration] Failed blob {}: {} ({})", &failure.cid, &failure.operation, &failure.error);
                     }
                 }
-                Err(e) => return Err(format!("Failed to download blob: {}", e)),
             }
-        }
-
-        // Update migration progress
-        let mut migration_progress = state.migration_progress.clone();
-        migration_progress.blobs_exported = true;
-        migration_progress.total_blob_bytes = total_blob_bytes;
-        migration_progress.downloaded_blob_bytes = total_blob_bytes;
-        dispatch.call(MigrationAction::SetMigrationProgress(migration_progress));
-
-        // Step 12-13: Upload blobs from OPFS to new PDS
-        console::info!(
-            "[Migration] Step 12-13: Uploading {} blobs from OPFS to new PDS",
-            downloaded_blobs.len()
-        );
-
-        for (index, (cid, blob_data)) in downloaded_blobs.iter().enumerate() {
-            dispatch.call(MigrationAction::SetMigrationStep(format!(
-                "Uploading blob {} of {} to new PDS...",
-                index + 1,
-                downloaded_blobs.len()
-            )));
-
-            match pds_client.upload_blob(new_session, cid.clone(), blob_data.clone()).await {
-                Ok(response) => {
-                    if response.success {
-                        console::info!("[Migration] Uploaded blob {} to new PDS", cid);
-                    } else {
-                        return Err(format!("Failed to upload blob: {}", response.message));
-                    }
-                }
-                Err(e) => return Err(format!("Failed to upload blob: {}", e)),
+            Err(error) => {
+                console::error!("[Migration] Smart blob migration failed: {}", &error);
+                return Err(format!("Smart blob migration failed: {}", error));
             }
-        }
-
-        // Update migration progress
-        let mut migration_progress = state.migration_progress.clone();
-        migration_progress.blobs_imported = true;
-        migration_progress.imported_blob_count = downloaded_blobs.len() as u32;
-        migration_progress.opfs_storage_used = 0; // Not using OPFS in client-side mode
-
-        dispatch.call(MigrationAction::SetMigrationProgress(migration_progress.clone()));
-
-        // Store migration progress in localStorage for resumability
-        use crate::features::migration::storage::{
-            BlobMigrationStatus, MigrationProgressData,
-        };
-        let progress_data = MigrationProgressData {
-            current_step: FormStep::PlcVerification,
-            completed_steps: vec![
-                "login".to_string(),
-                "pds_selection".to_string(),
-                "migration_details".to_string(),
-                "blob_migration".to_string(),
-            ],
-            blob_migration_status: BlobMigrationStatus::Completed,
-            total_blobs: migration_progress.total_blob_count,
-            processed_blobs: migration_progress.imported_blob_count,
-        };
-
-        if let Err(e) = LocalStorageManager::store_migration_progress(&progress_data) {
-            console::warn!(
-                "[Migration] Failed to store migration progress: {}",
-                format!("{:?}", e)
-            );
-        } else {
-            console::info!("[Migration] Migration progress stored for resumability");
-        }
-
-        // Clean up OPFS after successful upload
-        if let Err(e) = blob_manager.cleanup_blobs().await {
-            console::warn!(
-                "[Migration] Failed to cleanup OPFS blobs: {}",
-                format!("{}", e)
-            );
-            // Not critical - continue migration
         }
     } else {
         console::info!("[Migration] No missing blobs found - skipping blob migration");
+        
+        // Update migration progress for empty case
+        let mut migration_progress = state.migration_progress.clone();
+        migration_progress.missing_blobs_checked = true;
+        migration_progress.total_blob_count = 0;
+        migration_progress.blobs_imported = true;
+        dispatch.call(MigrationAction::SetMigrationProgress(migration_progress));
     }
 
     Ok(())
 }
+
 
 /// Migrate preferences using client-side operations
 #[cfg(feature = "web")]
@@ -660,6 +588,8 @@ async fn migrate_preferences_client_side(
 
     let pds_client = PdsClient::new();
 
+    // NEWBOLD.md Step: goat bsky prefs export > prefs.json (line 115)
+    // Implements: goat bsky prefs export > prefs.json
     let preferences_json = match pds_client.export_preferences(old_session).await {
         Ok(response) => {
             if response.success {
@@ -682,10 +612,12 @@ async fn migrate_preferences_client_side(
 
     // Step 15: Import preferences to new PDS
     console::info!("[Migration] Step 15: Importing preferences to new PDS");
+    // NEWBOLD.md Step: goat bsky prefs import prefs.json (line 118)
     dispatch.call(MigrationAction::SetMigrationStep(
         "Importing preferences to new PDS...".to_string(),
     ));
 
+    // Implements: goat bsky prefs import prefs.json
     match pds_client.import_preferences(new_session, preferences_json).await {
         Ok(response) => {
             if response.success {
@@ -712,6 +644,8 @@ async fn migrate_preferences_client_side(
 }
 
 /// Setup PLC operations and transition to Form 4 using client-side operations
+// NEWBOLD.md Steps: goat account plc recommended > plc_recommended.json (line 127) + goat account plc request-token (line 134)
+// Implements: Complete PLC transition setup including recommendation and token request
 #[cfg(feature = "web")]
 async fn setup_plc_transition_client_side(
     old_session: &ClientSessionCredentials,
@@ -727,6 +661,8 @@ async fn setup_plc_transition_client_side(
 
     let pds_client = PdsClient::new();
 
+    // NEWBOLD.md Step: goat account plc recommended > plc_recommended.json (line 127)
+    // Implements: goat account plc recommended > plc_recommended.json
     let plc_unsigned = match pds_client.get_plc_recommendation(new_session).await {
         Ok(response) => {
             if response.success {
@@ -801,61 +737,42 @@ async fn setup_plc_transition_client_side(
 /// Request a service auth token from the old PDS for migration
 #[cfg(feature = "web")]
 async fn request_service_auth_token(
-    _migration_client: &MigrationClient,
+    migration_client: &MigrationClient,
     old_session: &ClientSessionCredentials,
     target_pds_did: &str,
 ) -> Result<String, String> {
-    // The AT Protocol specifies that we need to call com.atproto.server.getServiceAuth
-    // to get a proper service auth token for creating accounts with existing DIDs
+    // Use the new PDS client method to generate service auth token
+    console::info!("[Migration] Requesting service auth token for target PDS: {}", target_pds_did);
+    
     let exp_timestamp = (js_sys::Date::now() / 1000.0) as u64 + 3600; // 1 hour expiration
-    let service_auth_url = format!(
-        "{}/xrpc/com.atproto.server.getServiceAuth?aud={}&exp={}&lxm={}", 
-        old_session.pds, 
-        target_pds_did,
-        exp_timestamp,
-        "com.atproto.server.createAccount"
-    );
-
-    console::info!("[Migration] Requesting service auth token from: {}", service_auth_url.clone());
     
-    // Create a new HTTP client for the service auth request
-    use reqwest::Client;
-    
-    #[cfg(target_arch = "wasm32")]
-    let http_client = Client::builder()
-        .user_agent("atproto-migration-service/1.0")
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-    
-    #[cfg(not(target_arch = "wasm32"))]
-    let http_client = Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent("atproto-migration-service/1.0")
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-    
-    let response = http_client
-        .get(&service_auth_url)
-        .header("Authorization", format!("Bearer {}", old_session.access_jwt))
-        .send()
-        .await
-        .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-    let status = response.status();
-    if status.is_success() {
-        let response_data: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        
-        if let Some(token) = response_data.get("token").and_then(|t| t.as_str()) {
-            Ok(token.to_string())
-        } else {
-            Err("No token in service auth response".to_string())
+    match migration_client.pds_client.get_service_auth(
+        old_session, 
+        target_pds_did, 
+        Some("com.atproto.server.createAccount"),
+        Some(exp_timestamp)
+    ).await {
+        Ok(response) => {
+            if response.success {
+                if let Some(token) = response.token {
+                    console::info!("[Migration] Service auth token generated successfully");
+                    Ok(token)
+                } else {
+                    let error_msg = "Service auth token generation succeeded but returned no token";
+                    console::error!("[Migration] {}", error_msg);
+                    Err(error_msg.to_string())
+                }
+            } else {
+                let error_msg = format!("Service auth token generation failed: {}", response.message);
+                console::error!("[Migration] {}", &error_msg);
+                Err(error_msg)
+            }
         }
-    } else {
-        let error_text = response.text().await.unwrap_or_default();
-        Err(format!("Service auth request failed with status {}: {}", status, error_text))
+        Err(e) => {
+            let error_msg = format!("Failed to call getServiceAuth: {}", e);
+            console::error!("[Migration] {}", &error_msg);
+            Err(error_msg)
+        }
     }
 }
 
@@ -985,8 +902,8 @@ async fn resume_from_repo_migration(
     // Execute repository migration
     migrate_repository_client_side(old_session, new_session, dispatch, state).await?;
 
-    // Continue with blob migration
-    migrate_blobs_client_side(old_session, new_session, dispatch, state).await?;
+    // Continue with blob migration using smart strategy
+    execute_smart_blob_migration(old_session, new_session, dispatch, state).await?;
 
     // Continue with preferences migration
     migrate_preferences_client_side(old_session, new_session, dispatch, state).await?;
@@ -1009,8 +926,8 @@ async fn resume_from_blob_migration(
     console::info!("[Migration] Resuming from blob migration - continuing to preferences and PLC");
     dispatch.call(MigrationAction::SetMigrationStep("Resuming migration from blob step...".to_string()));
     
-    // Execute blob migration
-    migrate_blobs_client_side(old_session, new_session, dispatch, state).await?;
+    // Execute blob migration using smart strategy
+    execute_smart_blob_migration(old_session, new_session, dispatch, state).await?;
 
     // Continue with preferences migration
     migrate_preferences_client_side(old_session, new_session, dispatch, state).await?;

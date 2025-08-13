@@ -66,8 +66,9 @@ impl DnsOverHttpsResolver {
                         .expect("Failed to create HTTP client")
                 }
             },
-            primary_endpoint: "https://cloudflare-dns.com/dns-query".to_string(),
+            primary_endpoint: "https://mozilla.cloudflare-dns.com/dns-query".to_string(),
             fallback_endpoints: vec![
+                "https://cloudflare-dns.com/dns-query".to_string(),
                 "https://dns.google/resolve".to_string(),
                 "https://dns.quad9.net:5053/dns-query".to_string(),
             ],

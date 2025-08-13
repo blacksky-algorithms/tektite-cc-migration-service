@@ -9,18 +9,13 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 #[cfg(feature = "web")]
 use gloo_storage::{LocalStorage, Storage};
 
+use crate::services::config::get_global_config;
 use gloo_console as console;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Maximum number of retry attempts for blob operations
-const MAX_RETRY_ATTEMPTS: u32 = 5;
-
 /// Base delay for exponential backoff (in milliseconds)
 const BASE_RETRY_DELAY_MS: u64 = 1000;
-
-/// Maximum LocalStorage blob storage size (50MB - conservative limit for localStorage)
-const MAX_WEBSTORAGE_BYTES: u64 = 50 * 1024 * 1024;
 
 /// LocalStorage key prefix for blobs
 const BLOB_KEY_PREFIX: &str = "migration_blob_";
@@ -214,7 +209,8 @@ impl BlobManager {
         );
 
         // Check storage quota before storing
-        if self.current_usage_bytes + data.len() as u64 > MAX_WEBSTORAGE_BYTES {
+        let config = get_global_config();
+        if self.current_usage_bytes + data.len() as u64 > config.storage.local_storage_limit {
             console::error!("[BlobManager] Storage quota would be exceeded");
             return Err(BlobError::StorageQuotaExceeded);
         }
@@ -222,7 +218,8 @@ impl BlobManager {
         let mut attempts = 0;
         let mut last_error = None;
 
-        while attempts < MAX_RETRY_ATTEMPTS {
+        let config = get_global_config();
+        while attempts < config.retry.max_attempts {
             attempts += 1;
 
             match self.store_blob_attempt(cid, &data).await {
@@ -255,7 +252,7 @@ impl BlobManager {
                     );
                     last_error = Some(e);
 
-                    if attempts < MAX_RETRY_ATTEMPTS {
+                    if attempts < config.retry.max_attempts {
                         // Exponential backoff delay
                         let delay_ms = BASE_RETRY_DELAY_MS * (2_u64.pow(attempts - 1));
                         console::info!("[BlobManager] Retrying in {} ms", delay_ms);
@@ -281,7 +278,7 @@ impl BlobManager {
         console::error!(
             "[BlobManager] Failed to store blob {} after {} attempts",
             cid,
-            MAX_RETRY_ATTEMPTS
+            config.retry.max_attempts
         );
         Err(BlobError::RetryExhausted(format!(
             "Failed to store blob {}: {}",
@@ -357,10 +354,11 @@ impl BlobManager {
 
     /// Get current storage information
     pub async fn get_storage_info(&self) -> Result<StorageInfo, BlobError> {
+        let config = get_global_config();
         Ok(StorageInfo {
             current_usage_bytes: self.current_usage_bytes,
-            max_storage_bytes: MAX_WEBSTORAGE_BYTES,
-            available_bytes: MAX_WEBSTORAGE_BYTES.saturating_sub(self.current_usage_bytes),
+            max_storage_bytes: config.storage.local_storage_limit,
+            available_bytes: config.storage.local_storage_limit.saturating_sub(self.current_usage_bytes),
             blob_count: self.blob_count,
         })
     }
@@ -433,17 +431,19 @@ impl BlobManager {
 
     /// Check if storage is near capacity
     pub fn is_near_capacity(&self) -> bool {
-        let usage_percentage = if MAX_WEBSTORAGE_BYTES == 0 {
+        let config = get_global_config();
+        let usage_percentage = if config.storage.local_storage_limit == 0 {
             0.0
         } else {
-            (self.current_usage_bytes as f64 / MAX_WEBSTORAGE_BYTES as f64) * 100.0
+            (self.current_usage_bytes as f64 / config.storage.local_storage_limit as f64) * 100.0
         };
         usage_percentage > 85.0
     }
 
     /// Get available storage bytes
     pub fn get_available_bytes(&self) -> u64 {
-        MAX_WEBSTORAGE_BYTES.saturating_sub(self.current_usage_bytes)
+        let config = get_global_config();
+        config.storage.local_storage_limit.saturating_sub(self.current_usage_bytes)
     }
 }
 
@@ -458,7 +458,8 @@ pub fn is_webstorage_supported() -> bool {
 pub async fn check_storage_quota() -> Result<u64, BlobError> {
     // LocalStorage typically has a 5-10MB limit per origin
     // We use a conservative 50MB limit to account for base64 overhead
-    Ok(MAX_WEBSTORAGE_BYTES)
+    let config = get_global_config();
+    Ok(config.storage.local_storage_limit)
 }
 
 /// Fallback functions for non-web environments
@@ -472,61 +473,18 @@ pub async fn check_storage_quota() -> Result<u64, BlobError> {
     Err(BlobError::WebStorageNotSupported)
 }
 
-/// Helper function to create a BlobManager instance with smart fallback
-/// Follows the fallback order: OPFS -> IndexedDB -> LocalStorage
-/// Each fallback provides progressively better compatibility but potentially worse performance
+/// Helper function to create a fallback blob manager (deprecated)
+/// This function is deprecated in favor of the new FallbackBlobManager
+/// which provides better integration and logging
+#[deprecated(since = "0.2.0", note = "Use crate::services::blob::blob_fallback_manager::create_fallback_blob_manager instead")]
 pub async fn create_blob_manager() -> Result<Box<dyn crate::services::blob::blob_manager_trait::BlobManagerTrait>, String> {
-    use crate::services::blob::blob_opfs_storage::OpfsBlobManager;
-    use crate::services::blob::blob_idb_storage::IdbBlobManager;
-    use crate::services::blob::blob_manager_trait::BlobManagerTrait;
+    console::warn!("⚠️ [create_blob_manager] Using deprecated create_blob_manager - consider upgrading to FallbackBlobManager");
     
-    console::info!("[create_blob_manager] 🔄 Initializing blob storage with fallback chain: OPFS -> IndexedDB -> LocalStorage");
+    use crate::services::blob::blob_fallback_manager::create_fallback_blob_manager;
     
-    // Try OPFS first (best performance for large files)
-    console::debug!("[create_blob_manager] 🏃 Attempting to initialize OPFS storage...");
-    match OpfsBlobManager::new().await {
-        Ok(manager) => {
-            console::info!("✅ [create_blob_manager] Using OPFS for blob storage (optimal performance)");
-            Ok(Box::new(manager) as Box<dyn BlobManagerTrait>)
-        }
-        Err(opfs_error) => {
-            let error_msg = format!("{}", opfs_error);
-            if error_msg.contains("SecurityError") || error_msg.contains("Security error") {
-                console::warn!("⚠️ [create_blob_manager] OPFS not available (security restriction), trying IndexedDB...");
-            } else {
-                console::warn!("⚠️ [create_blob_manager] OPFS failed ({}), trying IndexedDB...", error_msg);
-            }
-            
-            // Try IndexedDB as second choice (good balance of performance and compatibility)
-            console::debug!("[create_blob_manager] 🏃 Attempting to initialize IndexedDB storage...");
-            match IdbBlobManager::new().await {
-                Ok(manager) => {
-                    console::info!("✅ [create_blob_manager] Using IndexedDB for blob storage (good performance, wide compatibility)");
-                    Ok(Box::new(manager) as Box<dyn BlobManagerTrait>)
-                }
-                Err(idb_error) => {
-                    let idb_error_msg = format!("{}", idb_error);
-                    console::warn!("⚠️ [create_blob_manager] IndexedDB failed ({}), falling back to LocalStorage...", idb_error_msg);
-                    
-                    // Final fallback to LocalStorage (most compatible but most limited)
-                    console::debug!("[create_blob_manager] 🏃 Attempting to initialize LocalStorage...");
-                    match BlobManager::new().await {
-                        Ok(manager) => {
-                            console::info!("✅ [create_blob_manager] Using LocalStorage for blob storage (limited size, maximum compatibility)");
-                            Ok(Box::new(manager) as Box<dyn BlobManagerTrait>)
-                        }
-                        Err(ls_error) => {
-                            let error_msg = format!(
-                                "All storage backends failed - OPFS({}), IndexedDB({}), LocalStorage({})", 
-                                opfs_error, idb_error, ls_error
-                            );
-                            console::error!("❌ [create_blob_manager] {}", error_msg.clone());
-                            Err(error_msg)
-                        }
-                    }
-                }
-            }
-        }
+    match create_fallback_blob_manager().await {
+        Ok(manager) => Ok(Box::new(manager) as Box<dyn crate::services::blob::blob_manager_trait::BlobManagerTrait>),
+        Err(e) => Err(format!("{}", e)),
     }
 }
 

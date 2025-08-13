@@ -10,6 +10,7 @@ use async_trait::async_trait;
 pub enum BlobManagerError {
     StorageError(String),
     NotFound(String),
+    BlobNotFound(String),
     QuotaExceeded(String),
     SecurityError(String),
     Unknown(String),
@@ -20,9 +21,49 @@ impl std::fmt::Display for BlobManagerError {
         match self {
             BlobManagerError::StorageError(msg) => write!(f, "Storage Error: {}", msg),
             BlobManagerError::NotFound(msg) => write!(f, "Not Found: {}", msg),
+            BlobManagerError::BlobNotFound(msg) => write!(f, "Blob Not Found: {}", msg),
             BlobManagerError::QuotaExceeded(msg) => write!(f, "Quota Exceeded: {}", msg),
             BlobManagerError::SecurityError(msg) => write!(f, "Security Error: {}", msg),
             BlobManagerError::Unknown(msg) => write!(f, "Unknown Error: {}", msg),
+        }
+    }
+}
+
+// Add conversion from different storage manager error types
+impl From<crate::services::blob::blob_idb_storage::IdbBlobError> for BlobManagerError {
+    fn from(err: crate::services::blob::blob_idb_storage::IdbBlobError) -> Self {
+        match err {
+            crate::services::blob::blob_idb_storage::IdbBlobError::NotFound(cid) => BlobManagerError::BlobNotFound(cid),
+            crate::services::blob::blob_idb_storage::IdbBlobError::StorageQuotaExceeded => BlobManagerError::QuotaExceeded("IndexedDB quota exceeded".to_string()),
+            crate::services::blob::blob_idb_storage::IdbBlobError::NotSupported => BlobManagerError::StorageError("IndexedDB not supported".to_string()),
+            _ => BlobManagerError::StorageError(format!("IndexedDB error: {}", err)),
+        }
+    }
+}
+
+impl From<crate::services::blob::blob_storage::BlobError> for BlobManagerError {
+    fn from(err: crate::services::blob::blob_storage::BlobError) -> Self {
+        match err {
+            crate::services::blob::blob_storage::BlobError::BlobNotFound(cid) => BlobManagerError::BlobNotFound(cid),
+            crate::services::blob::blob_storage::BlobError::StorageQuotaExceeded => BlobManagerError::QuotaExceeded("LocalStorage quota exceeded".to_string()),
+            crate::services::blob::blob_storage::BlobError::WebStorageNotSupported => BlobManagerError::StorageError("LocalStorage not supported".to_string()),
+            _ => BlobManagerError::StorageError(format!("LocalStorage error: {}", err)),
+        }
+    }
+}
+
+impl From<crate::services::blob::blob_opfs_storage::OpfsError> for BlobManagerError {
+    fn from(err: crate::services::blob::blob_opfs_storage::OpfsError) -> Self {
+        match err {
+            crate::services::blob::blob_opfs_storage::OpfsError::NotFound(cid) => BlobManagerError::BlobNotFound(cid),
+            crate::services::blob::blob_opfs_storage::OpfsError::Storage(msg) => {
+                if msg.contains("quota") || msg.contains("storage") {
+                    BlobManagerError::QuotaExceeded(format!("OPFS quota exceeded: {}", msg))
+                } else {
+                    BlobManagerError::StorageError(format!("OPFS storage error: {}", msg))
+                }
+            },
+            crate::services::blob::blob_opfs_storage::OpfsError::InvalidData(msg) => BlobManagerError::StorageError(format!("OPFS invalid data: {}", msg)),
         }
     }
 }

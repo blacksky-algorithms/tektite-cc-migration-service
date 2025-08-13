@@ -73,7 +73,9 @@ pub struct ClientSessionCredentials {
     pub did: String,
     pub handle: String,
     pub pds: String,
+    #[serde(rename = "accessJwt")]
     pub access_jwt: String,
+    #[serde(rename = "refreshJwt")]
     pub refresh_jwt: String,
     pub expires_at: Option<u64>,
 }
@@ -122,7 +124,9 @@ pub struct ClientCreateAccountRequest {
     pub handle: String,
     pub password: String,
     pub email: String,
+    #[serde(rename = "inviteCode")]
     pub invite_code: Option<String>,
+    #[serde(skip)] // Not part of AT Protocol API - used for Authorization header
     pub service_auth_token: Option<String>, // For creating accounts with existing DIDs
 }
 
@@ -193,6 +197,7 @@ pub struct ClientRepoImportResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ClientMissingBlob {
     pub cid: String,
+    #[serde(rename = "recordUri")]
     pub record_uri: String,
 }
 
@@ -285,12 +290,75 @@ pub struct ClientAccountStatusResponse {
     pub success: bool,
     pub message: String,
     pub activated: Option<bool>,
+    #[serde(rename = "expectedBlobs")]
     pub expected_blobs: Option<i64>,
+    #[serde(rename = "importedBlobs")]
     pub imported_blobs: Option<i64>,
+    #[serde(rename = "indexedRecords")]
     pub indexed_records: Option<i64>,
+    #[serde(rename = "privateStateValues")]
     pub private_state_values: Option<i64>,
+    #[serde(rename = "repoBlocks")]
     pub repo_blocks: Option<i64>,
+    #[serde(rename = "repoCommit")]
     pub repo_commit: Option<String>,
+    #[serde(rename = "repoRev")]
     pub repo_rev: Option<String>,
+    #[serde(rename = "validDid")]
     pub valid_did: Option<bool>,
+}
+
+/// Service auth request for secure account creation
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ClientServiceAuthRequest {
+    pub aud: String,                    // Target PDS service DID (audience)
+    pub lxm: Option<String>,           // Method restriction (e.g. "com.atproto.server.createAccount")
+    #[serde(rename = "exp")]
+    pub expires_at: Option<u64>,       // Expiration timestamp (unix seconds)
+}
+
+impl ClientServiceAuthRequest {
+    /// Create a new service auth request for account creation
+    pub fn for_account_creation(target_pds_did: &str, expires_in_seconds: Option<u64>) -> Self {
+        let expires_at = if let Some(duration) = expires_in_seconds {
+            Some(current_time_secs() + duration)
+        } else {
+            Some(current_time_secs() + 3600) // Default 1 hour
+        };
+        
+        Self {
+            aud: target_pds_did.to_string(),
+            lxm: Some("com.atproto.server.createAccount".to_string()),
+            expires_at,
+        }
+    }
+    
+    /// Create a generic service auth request
+    pub fn new(target_pds_did: &str, method: Option<&str>, expires_in_seconds: Option<u64>) -> Self {
+        let expires_at = expires_in_seconds.map(|duration| current_time_secs() + duration);
+        
+        Self {
+            aud: target_pds_did.to_string(),
+            lxm: method.map(|s| s.to_string()),
+            expires_at,
+        }
+    }
+}
+
+/// Service auth response containing the JWT token
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ClientServiceAuthResponse {
+    pub success: bool,
+    pub message: String,
+    pub token: Option<String>,         // The service auth JWT token
+}
+
+/// Sync list blobs response (matches Go SyncListBlobs_Output)
+/// This is used by com.atproto.sync.listBlobs for full blob enumeration
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ClientSyncListBlobsResponse {
+    pub success: bool,
+    pub message: String,
+    pub cids: Option<Vec<String>>,     // Simple CID list (matches Go []string)
+    pub cursor: Option<String>,        // Pagination cursor (matches Go *string)
 }

@@ -8,12 +8,16 @@
 //
 // This replaces server-side functions to create a fully browser-based migration service.
 
+pub mod cid;
 pub mod types;
 pub mod errors;
 pub mod dns_over_https;
 pub mod identity_resolver;
 pub mod session;
 pub mod pds_client;
+
+#[cfg(test)]
+pub mod cursor_test;
 
 // Re-export core types for easy access
 pub use types::{
@@ -41,6 +45,11 @@ pub use types::{
     ClientPlcTokenResponse,
     ClientPlcSignResponse,
     ClientPlcSubmitResponse,
+    // Service Auth types
+    ClientServiceAuthRequest,
+    ClientServiceAuthResponse,
+    // Sync types  
+    ClientSyncListBlobsResponse,
     // DNS types
     CloudflareDoHResponse,
     DnsQuestion,

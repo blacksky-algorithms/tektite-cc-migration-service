@@ -5,7 +5,7 @@ use tracing::{info, warn, debug, instrument};
 
 use super::dns_over_https::{DnsResolver, DnsOverHttpsResolver};
 use super::errors::ResolveError;
-use super::types::ClientPdsProvider;
+use super::types::{ClientPdsProvider, DidDocument};
 
 /// Check if a handle is potentially valid and worth resolving
 fn should_resolve_handle(handle: &str) -> bool {
@@ -183,7 +183,7 @@ pub async fn determine_pds_provider_client_side(
 ) -> ClientPdsProvider {
     // If it's already a DID, try to resolve the DID document
     if handle_or_did.starts_with("did:") {
-        return determine_provider_from_did(handle_or_did).await;
+        return determine_provider_from_did(handle_or_did, http_client).await;
     }
 
     
@@ -201,7 +201,7 @@ pub async fn determine_pds_provider_client_side(
         ClientPdsProvider::Other(_) => {
             // For custom domains, try to resolve and get provider from DID
             match resolve_handle_client_side(handle_or_did, doh_resolver, http_client).await {
-                Ok(did) => determine_provider_from_did(&did).await,
+                Ok(did) => determine_provider_from_did(&did, http_client).await,
                 Err(_) => provider_from_domain, // Fallback to domain heuristics
             }
         }
@@ -209,12 +209,165 @@ pub async fn determine_pds_provider_client_side(
     }
 }
 
-/// Determine PDS provider from DID document (placeholder - would need full DID resolution)
-async fn determine_provider_from_did(did: &str) -> ClientPdsProvider {
-    // For now, return Other with the DID
-    // TODO: Implement proper DID document resolution to find PDS endpoints
-    info!("Would resolve DID document for: {}", did);
-    ClientPdsProvider::Other(format!("DID: {}", did))
+/// Determine PDS provider from DID document by resolving and analyzing service endpoints
+#[instrument(skip(http_client))]
+async fn determine_provider_from_did(did: &str, http_client: &Client) -> ClientPdsProvider {
+    info!("Resolving DID document for: {}", did);
+    
+    // Resolve the DID document
+    let did_document = match resolve_did_document(did, http_client).await {
+        Ok(doc) => doc,
+        Err(e) => {
+            warn!("Failed to resolve DID document for {}: {}", did, e);
+            return ClientPdsProvider::Other(format!("DID: {} (resolution failed)", did));
+        }
+    };
+    
+    // Extract PDS endpoints from the DID document
+    let pds_endpoints = did_document.pds_endpoints();
+    info!("Found {} PDS endpoints for {}: {:?}", pds_endpoints.len(), did, pds_endpoints);
+    
+    if pds_endpoints.is_empty() {
+        warn!("No PDS endpoints found in DID document for {}", did);
+        return ClientPdsProvider::Other(format!("DID: {} (no PDS)", did));
+    }
+    
+    // Determine provider based on the first PDS endpoint
+    let pds_endpoint = &pds_endpoints[0];
+    determine_provider_from_pds_endpoint(pds_endpoint)
+}
+
+/// Resolve DID document from various DID methods
+#[instrument(skip(http_client))]
+async fn resolve_did_document(did: &str, http_client: &Client) -> Result<DidDocument, ResolveError> {
+    if let Some(plc_id) = did.strip_prefix("did:plc:") {
+        resolve_did_plc(plc_id, http_client).await
+    } else if let Some(web_domain) = did.strip_prefix("did:web:") {
+        resolve_did_web(web_domain, http_client).await
+    } else {
+        Err(ResolveError::UnsupportedDidMethod { did: did.to_string() })
+    }
+}
+
+/// Resolve DID:PLC document from plc.directory
+#[instrument(skip(http_client))]
+async fn resolve_did_plc(plc_id: &str, http_client: &Client) -> Result<DidDocument, ResolveError> {
+    let plc_url = format!("https://plc.directory/did:plc:{}", plc_id);
+    info!("Fetching DID:PLC document from: {}", plc_url);
+    
+    let response = http_client
+        .get(&plc_url)
+        .header("Accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| ResolveError::HttpRequestFailed {
+            error: format!("Failed to fetch DID:PLC document: {}", e)
+        })?;
+    
+    if !response.status().is_success() {
+        return Err(ResolveError::HttpRequestFailed {
+            error: format!("HTTP {} when fetching DID:PLC document", response.status())
+        });
+    }
+    
+    let did_document: DidDocument = response
+        .json()
+        .await
+        .map_err(|e| ResolveError::JsonParseError {
+            error: format!("Failed to parse DID:PLC document: {}", e)
+        })?;
+    
+    debug!("Successfully resolved DID:PLC document for {}", plc_id);
+    Ok(did_document)
+}
+
+/// Resolve DID:WEB document from web domain
+#[instrument(skip(http_client))]
+async fn resolve_did_web(web_domain: &str, http_client: &Client) -> Result<DidDocument, ResolveError> {
+    // DID:WEB resolution: https://domain.com/.well-known/did.json
+    let web_url = format!("https://{}/.well-known/did.json", web_domain);
+    info!("Fetching DID:WEB document from: {}", web_url);
+    
+    let response = http_client
+        .get(&web_url)
+        .header("Accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| ResolveError::HttpRequestFailed {
+            error: format!("Failed to fetch DID:WEB document: {}", e)
+        })?;
+    
+    if !response.status().is_success() {
+        return Err(ResolveError::HttpRequestFailed {
+            error: format!("HTTP {} when fetching DID:WEB document", response.status())
+        });
+    }
+    
+    let did_document: DidDocument = response
+        .json()
+        .await
+        .map_err(|e| ResolveError::JsonParseError {
+            error: format!("Failed to parse DID:WEB document: {}", e)
+        })?;
+    
+    debug!("Successfully resolved DID:WEB document for {}", web_domain);
+    Ok(did_document)
+}
+
+/// Determine provider from PDS endpoint URL
+fn determine_provider_from_pds_endpoint(pds_endpoint: &str) -> ClientPdsProvider {
+    info!("Determining provider from PDS endpoint: {}", pds_endpoint);
+    
+    // Extract hostname from URL using simple string parsing
+    let hostname = extract_hostname_from_url(pds_endpoint);
+    
+    match hostname.as_str() {
+        "bsky.social" | "bsky.network" => {
+            info!("Identified Bluesky provider from PDS endpoint: {}", hostname);
+            ClientPdsProvider::Bluesky
+        }
+        host if host.ends_with(".bsky.social") || host.ends_with(".bsky.network") => {
+            info!("Identified Bluesky provider from PDS endpoint subdomain: {}", host);
+            ClientPdsProvider::Bluesky
+        }
+        "blacksky.app" => {
+            info!("Identified BlackSky provider from PDS endpoint: {}", hostname);
+            ClientPdsProvider::BlackSky
+        }
+        host if host.ends_with(".blacksky.app") => {
+            info!("Identified BlackSky provider from PDS endpoint subdomain: {}", host);
+            ClientPdsProvider::BlackSky
+        }
+        _ => {
+            info!("Unknown PDS provider, using hostname: {}", hostname);
+            ClientPdsProvider::Other(hostname)
+        }
+    }
+}
+
+/// Extract hostname from URL using simple string parsing
+fn extract_hostname_from_url(url: &str) -> String {
+    // Handle https:// and http:// prefixes
+    let url = if url.starts_with("https://") {
+        &url[8..]
+    } else if url.starts_with("http://") {
+        &url[7..]
+    } else {
+        url
+    };
+    
+    // Find the first slash or colon (for port) and take everything before it
+    let hostname = url
+        .split('/')
+        .next()
+        .unwrap_or(url)
+        .split(':')
+        .next()
+        .unwrap_or(url);
+    
+    hostname.to_string()
 }
 
 /// Determine PDS provider from handle domain heuristics
@@ -364,5 +517,32 @@ mod tests {
         assert!(!resolver.is_valid_did("not-a-did"));
         assert!(!resolver.is_valid_did("did:"));
         assert!(!resolver.is_valid_did("did:onlymethod"));
+    }
+
+    #[test]
+    fn test_hostname_extraction() {
+        assert_eq!(extract_hostname_from_url("https://bsky.social/xrpc/com.atproto.server.createSession"), "bsky.social");
+        assert_eq!(extract_hostname_from_url("http://blacksky.app"), "blacksky.app");
+        assert_eq!(extract_hostname_from_url("https://pds.example.com:8080/path"), "pds.example.com");
+        assert_eq!(extract_hostname_from_url("bsky.social"), "bsky.social");
+        assert_eq!(extract_hostname_from_url("localhost:3000"), "localhost");
+    }
+
+    #[test]
+    fn test_provider_determination_from_endpoints() {
+        // Test Bluesky endpoints
+        assert_eq!(determine_provider_from_pds_endpoint("https://bsky.social"), ClientPdsProvider::Bluesky);
+        assert_eq!(determine_provider_from_pds_endpoint("https://bsky.network"), ClientPdsProvider::Bluesky);
+        assert_eq!(determine_provider_from_pds_endpoint("https://pds.bsky.social"), ClientPdsProvider::Bluesky);
+        
+        // Test BlackSky endpoints  
+        assert_eq!(determine_provider_from_pds_endpoint("https://blacksky.app"), ClientPdsProvider::BlackSky);
+        assert_eq!(determine_provider_from_pds_endpoint("https://pds.blacksky.app"), ClientPdsProvider::BlackSky);
+        
+        // Test custom endpoints
+        match determine_provider_from_pds_endpoint("https://custom.pds.example.com") {
+            ClientPdsProvider::Other(hostname) => assert_eq!(hostname, "custom.pds.example.com"),
+            _ => panic!("Expected Other provider"),
+        }
     }
 }

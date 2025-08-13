@@ -22,10 +22,25 @@ pub struct ClientLoginFormComponentProps {
 }
 
 #[cfg(feature = "web")]
+/// Check if a handle is potentially valid and worth resolving (prevents unnecessary network calls)
+fn should_resolve_handle(handle: &str) -> bool {
+    // Basic validation to prevent unnecessary network calls
+    handle.len() > 6 &&  // Minimum viable handle length (e.g., "a.b.co")
+    handle.contains('.') &&
+    handle.chars().last().is_some_and(|c| c.is_alphabetic()) &&
+    !handle.ends_with('.') &&  // Don't resolve incomplete handles like "torrho."
+    handle.split('.').count() >= 2 &&  // Must have at least domain.tld
+    !handle.contains(' ')  // No spaces allowed
+}
+
+#[cfg(feature = "web")]
 #[component]
 pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element {
     let state = props.state;
     let dispatch = props.dispatch;
+    
+    // Use local state to track the current request ID to prevent race conditions
+    let mut request_counter = use_signal(|| 0u32);
 
     rsx! {
         div {
@@ -53,19 +68,72 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                     on_change: move |data: String| {
                         dispatch.call(MigrationAction::SetHandle(data.clone()));
 
-                        if !data.trim().is_empty() && !data.starts_with("did:") {
-                            dispatch.call(MigrationAction::SetLoading(true));
-                            spawn(async move {
-                                let migration_client = MigrationClient::new();
-                                let provider = migration_client.determine_provider(&data).await;
-                                
+                        // Clear provider immediately when input changes
+                        dispatch.call(MigrationAction::SetProvider(ClientPdsProvider::None));
+                        
+                        let trimmed_data = data.trim();
+                        
+                        // Handle DID inputs differently (no resolution needed)
+                        if trimmed_data.starts_with("did:") {
+                            dispatch.call(MigrationAction::SetLoading(false));
+                            return;
+                        }
+                        
+                        // Skip empty inputs
+                        if trimmed_data.is_empty() {
+                            dispatch.call(MigrationAction::SetLoading(false));
+                            return;
+                        }
+                        
+                        // Skip obviously incomplete/invalid handles to prevent unnecessary network calls
+                        if !should_resolve_handle(trimmed_data) {
+                            console::log!("Skipping provider resolution for incomplete handle:", trimmed_data);
+                            dispatch.call(MigrationAction::SetLoading(false));
+                            return;
+                        }
+                        
+                        // Increment request counter to track this request
+                        let current_request_id = {
+                            let new_id = request_counter() + 1;
+                            request_counter.set(new_id);
+                            new_id
+                        };
+                        
+                        console::log!(&format!("Starting provider resolution for '{}' (request {})", trimmed_data, current_request_id));
+                        dispatch.call(MigrationAction::SetLoading(true));
+                        
+                        // Use a cloned version of the data for the async task
+                        let data_for_async = trimmed_data.to_string();
+                        
+                        spawn(async move {
+                            // Add a small delay to debounce rapid keystrokes
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                use gloo_timers::future::TimeoutFuture;
+                                TimeoutFuture::new(300).await; // 300ms debounce
+                            }
+                            
+                            // Check if this is still the most recent request
+                            let current_counter = request_counter();
+                            if current_request_id != current_counter {
+                                console::log!(&format!("Ignoring outdated provider resolution request {} (current: {})", current_request_id, current_counter));
+                                return;
+                            }
+                            
+                            console::log!(&format!("Executing provider resolution for '{}' (request {})", data_for_async, current_request_id));
+                            
+                            let migration_client = MigrationClient::new();
+                            let provider = migration_client.determine_provider(&data_for_async).await;
+                            
+                            // Final check - only update if this is still the most recent request
+                            if current_request_id == request_counter() {
+                                console::log!(&format!("Provider resolution completed for '{}': {:?} (request {})", data_for_async, provider, current_request_id));
                                 dispatch.call(MigrationAction::SetProvider(provider));
                                 dispatch.call(MigrationAction::SetLoading(false));
-                            });
-                        } else {
-                            dispatch.call(MigrationAction::SetProvider(ClientPdsProvider::None));
-                            dispatch.call(MigrationAction::SetLoading(false));
-                        }
+                            } else {
+                                console::log!(&format!("Discarding outdated provider resolution result for request {}", current_request_id));
+                            }
+                        });
                     }
                 }
             }

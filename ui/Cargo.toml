@@ -9,6 +9,7 @@ gloo-storage = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 gloo-console = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
 base64 = "0.22"
 
 #storage
@@ -16,16 +17,22 @@ opfs ={ version = "0.1.3", optional = true }
 idb = "0.6.4"
 serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 
 # Client-side HTTP and DNS - WASM compatible
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 async-trait = "0.1.88"
 anyhow = "1.0"
-lru = "0.12"
+lru = "0.16"
+futures = "0.3"
+futures-util = "0.3"
 
 # Additional web APIs for enhanced client functionality
 js-sys = "0.3"
+web-sys = { version = "0.3", features = ["StorageManager", "Navigator", "Window"] }
 tracing = "0.1"
+thiserror = "2.0"
+regex = "1.11"
 
 # Conditional tokio features for WASM vs native
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -37,6 +44,3 @@ tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
 [features]
 default = ["web"]
 web = ["dep:opfs"]
-
-# web = ["dep:opfs", "dep:wasm-bindgen", "dep:wasm-bindgen-futures"]
-# web = []

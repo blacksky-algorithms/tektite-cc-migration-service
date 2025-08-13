@@ -1,4 +1,10 @@
+use crate::services::config::get_global_config;
 use gloo_console as console;
+
+/// Helper function to safely format u64 values for logging to avoid BigInt serialization issues
+fn format_bytes(bytes: u64) -> String {
+    bytes.to_string()
+}
 use opfs::persistent::{app_specific_dir, DirectoryHandle};
 use opfs::{CreateWritableOptions, GetDirectoryHandleOptions, GetFileHandleOptions};
 use opfs::{DirectoryHandle as _, FileHandle as _, WritableFileStream as _};
@@ -69,7 +75,7 @@ impl OpfsBlobManager {
     }
 
     pub async fn store_blob(&self, cid: &str, data: Vec<u8>) -> Result<(), OpfsError> {
-        console::info!("[OpfsBlobManager] 💾 Storing blob {} ({} bytes)", cid, data.len());
+        console::info!("[OpfsBlobManager] 💾 Storing blob {} ({} bytes)", cid, format_bytes(data.len() as u64));
         
         console::debug!("[OpfsBlobManager] 📝 Creating file handle for blob {}", cid);
         let options = GetFileHandleOptions { create: true };
@@ -133,7 +139,7 @@ impl OpfsBlobManager {
             OpfsError::from_opfs_error(e)
         })?;
         
-        console::info!("[OpfsBlobManager] ✅ Blob {} retrieved successfully ({} bytes)", cid, data.len());
+        console::info!("[OpfsBlobManager] ✅ Blob {} retrieved successfully ({} bytes)", cid, format_bytes(data.len() as u64));
         Ok(data)
     }
 
@@ -158,7 +164,7 @@ impl OpfsBlobManager {
             .map_err(OpfsError::from_opfs_error)?;
 
         // Note: This is a simplified version - actual implementation would iterate through stream
-        console::info!("OPFS storage usage: {} bytes", total_size.to_string());
+        console::info!("OPFS storage usage: {} bytes", format_bytes(total_size));
         Ok(total_size)
     }
 
@@ -171,14 +177,14 @@ impl OpfsBlobManager {
 
     /// Store blob with retry logic (compatible with LocalStorage BlobManager interface)
     pub async fn store_blob_with_retry(&self, cid: &str, data: Vec<u8>) -> Result<(), OpfsError> {
-        const MAX_RETRIES: u32 = 3;
+        let config = get_global_config();
         let mut attempts = 0;
         
         loop {
             attempts += 1;
             match self.store_blob(cid, data.clone()).await {
                 Ok(()) => return Ok(()),
-                Err(e) if attempts >= MAX_RETRIES => return Err(e),
+                Err(e) if attempts >= config.retry.storage_retries => return Err(e),
                 Err(_) => {
                     console::warn!("Blob storage attempt {} failed, retrying...", attempts);
                     // Simple backoff delay could be added here

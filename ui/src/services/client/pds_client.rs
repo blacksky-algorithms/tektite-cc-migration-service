@@ -40,6 +40,8 @@ impl PdsClient {
     }
 
     /// Login to a PDS using identifier and password
+    // NEWBOLD.md Step: goat account login --pds-host $NEWPDSHOST -u $ACCOUNTDID -p $NEWPASSWORD (line 52)
+    // Implements: Creates session on PDS for specified account identifier
     #[instrument(skip(self, password), err)]
     pub async fn login(&self, identifier: &str, password: &str) -> Result<ClientLoginResponse, ClientError> {
         info!("Starting login for identifier: {}", identifier);
@@ -62,6 +64,7 @@ impl PdsClient {
         };
         
         // Call ATProto createSession
+        // NEWBOLD.md: com.atproto.server.createSession for authentication 
         let session_url = format!("{}/xrpc/com.atproto.server.createSession", pds_url);
         let request_body = json!({
             "identifier": identifier,
@@ -190,6 +193,8 @@ impl PdsClient {
     }
 
     /// Create account on a PDS
+    // NEWBOLD.md Step: goat account create --pds-host $NEWPDSHOST --existing-did $ACCOUNTDID --handle $NEWHANDLE --password $NEWPASSWORD --email $NEWEMAIL --invite-code $INVITECODE --service-auth $SERVICEAUTH (line 40-47)
+    // Implements: Creates account on new PDS with existing DID using service auth token
     #[instrument(skip(self), err)]
     pub async fn create_account(&self, request: ClientCreateAccountRequest) -> Result<ClientCreateAccountResponse, ClientError> {
         info!("Creating account for handle: {}", request.handle);
@@ -197,6 +202,7 @@ impl PdsClient {
         // Derive PDS URL from handle domain (simplified approach)
         let pds_url = self.derive_pds_url_from_handle(&request.handle);
         
+        // NEWBOLD.md: com.atproto.server.createAccount for account creation with existing DID
         let create_url = format!("{}/xrpc/com.atproto.server.createAccount", pds_url);
         let mut request_body = json!({
             "did": request.did,
@@ -332,8 +338,11 @@ impl PdsClient {
     }
 
     /// Check account status
+    // NEWBOLD.md Step: goat account status (line 58)
+    // Implements: Checks migration progress including blobs, records, and validation status
     #[instrument(skip(self), err)]
     pub async fn check_account_status(&self, session: &ClientSessionCredentials) -> Result<ClientAccountStatusResponse, ClientError> {
+        // NEWBOLD.md: com.atproto.server.checkAccountStatus for migration progress tracking
         let status_url = format!("{}/xrpc/com.atproto.server.checkAccountStatus", session.pds);
 
         let response = self.http_client
@@ -501,10 +510,13 @@ impl PdsClient {
     }
 
     /// Export repository from PDS as CAR file
+    // NEWBOLD.md Step: goat repo export $ACCOUNTDID (line 76)
+    // Implements: Exports repository as CAR file for migration
     #[instrument(skip(self), err)]
     pub async fn export_repository(&self, session: &ClientSessionCredentials) -> Result<ClientRepoExportResponse, ClientError> {
         info!("Exporting repository for DID: {}", session.did);
 
+        // NEWBOLD.md: com.atproto.sync.getRepo for repository export
         let export_url = format!("{}/xrpc/com.atproto.sync.getRepo?did={}", session.pds, session.did);
 
         let response = self.http_client
@@ -547,10 +559,13 @@ impl PdsClient {
     }
 
     /// Import repository to PDS from CAR file
+    // NEWBOLD.md Step: goat repo import ./did:plc:do2ar6uqzrvyzq3wevji6fbe.20250625142552.car (line 81)
+    // Implements: Imports repository CAR file to new PDS
     #[instrument(skip(self), err)]
     pub async fn import_repository(&self, session: &ClientSessionCredentials, car_data: Vec<u8>) -> Result<ClientRepoImportResponse, ClientError> {
         info!("Importing repository for DID: {}, CAR size: {} bytes", session.did, car_data.len());
 
+        // NEWBOLD.md: com.atproto.repo.importRepo for CAR file import
         let import_url = format!("{}/xrpc/com.atproto.repo.importRepo", session.pds);
 
         let response = self.http_client
@@ -583,10 +598,13 @@ impl PdsClient {
     }
 
     /// Get list of missing blobs for account
+    // NEWBOLD.md Step: goat account missing-blobs (line 86)
+    // Implements: Lists missing blobs that need migration to new PDS
     #[instrument(skip(self), err)]
     pub async fn get_missing_blobs(&self, session: &ClientSessionCredentials, cursor: Option<String>, limit: Option<i64>) -> Result<ClientMissingBlobsResponse, ClientError> {
         info!("Getting missing blobs for DID: {}", session.did);
 
+        // NEWBOLD.md: com.atproto.repo.listMissingBlobs for migration-specific blob enumeration
         let mut missing_blobs_url = format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
         let mut query_params = Vec::new();
         
@@ -617,13 +635,11 @@ impl PdsClient {
                     message: format!("Failed to parse missing blobs response: {}", e),
                 })?;
 
-            // Parse the blobs from the response
+            // Parse the blobs from the response using proper deserialization
             let missing_blobs = if let Some(blobs_array) = blobs_data.get("blobs").and_then(|b| b.as_array()) {
                 blobs_array.iter()
                     .filter_map(|blob| {
-                        let cid = blob.get("cid")?.as_str()?.to_string();
-                        let record_uri = blob.get("recordUri")?.as_str()?.to_string();
-                        Some(ClientMissingBlob { cid, record_uri })
+                        serde_json::from_value::<ClientMissingBlob>(blob.clone()).ok()
                     })
                     .collect()
             } else {
@@ -632,7 +648,7 @@ impl PdsClient {
 
             let cursor = blobs_data.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
 
-            info!("Found {} missing blobs", missing_blobs.len());
+            info!("Found {} missing blobs", missing_blobs.len().to_string());
 
             Ok(ClientMissingBlobsResponse {
                 success: true,
@@ -653,11 +669,97 @@ impl PdsClient {
         }
     }
 
+    /// List all blobs in repository using com.atproto.sync.listBlobs (matches Go goat)
+    /// This method provides full blob enumeration like the Go SyncListBlobs implementation
+    // NEWBOLD.md Compatible: Matches goat blob export enumeration pattern for full repository listing
+    // Implements: Full blob enumeration using com.atproto.sync.listBlobs (Go goat compatible)
+    #[instrument(skip(self), err)]
+    pub async fn sync_list_blobs(
+        &self,
+        session: &ClientSessionCredentials,
+        did: &str,
+        cursor: Option<String>,
+        limit: Option<i64>,
+        since: Option<String>,
+    ) -> Result<ClientSyncListBlobsResponse, ClientError> {
+        info!("Listing all blobs for DID: {} (sync.listBlobs)", did);
+
+        // NEWBOLD.md: com.atproto.sync.listBlobs for Go goat compatible full blob enumeration
+        let mut list_blobs_url = format!("{}/xrpc/com.atproto.sync.listBlobs", session.pds);
+        let mut query_params = Vec::new();
+        
+        // Required parameter
+        query_params.push(format!("did={}", did));
+        
+        // Optional parameters
+        if let Some(cursor) = cursor {
+            query_params.push(format!("cursor={}", cursor));
+        }
+        if let Some(limit) = limit {
+            query_params.push(format!("limit={}", limit));
+        }
+        if let Some(since) = since {
+            query_params.push(format!("since={}", since));
+        }
+        
+        list_blobs_url.push('?');
+        list_blobs_url.push_str(&query_params.join("&"));
+
+        let response = self.http_client
+            .get(&list_blobs_url)
+            .header("Authorization", format!("Bearer {}", session.access_jwt))
+            .send()
+            .await
+            .map_err(|e| ClientError::NetworkError {
+                message: format!("Failed to list blobs: {}", e),
+            })?;
+
+        if response.status().is_success() {
+            let blobs_data: serde_json::Value = response.json().await
+                .map_err(|e| ClientError::NetworkError {
+                    message: format!("Failed to parse list blobs response: {}", e),
+                })?;
+
+            // Parse the CIDs array from the response (matches Go []string structure)
+            let cids = if let Some(cids_array) = blobs_data.get("cids").and_then(|c| c.as_array()) {
+                cids_array.iter()
+                    .filter_map(|cid| cid.as_str().map(|s| s.to_string()))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            let cursor = blobs_data.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
+
+            info!("Found {} blobs in repository", cids.len());
+
+            Ok(ClientSyncListBlobsResponse {
+                success: true,
+                message: format!("Found {} blobs", cids.len()),
+                cids: Some(cids),
+                cursor,
+            })
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            error!("Failed to list blobs: {}", error_text);
+
+            Ok(ClientSyncListBlobsResponse {
+                success: false,
+                message: format!("Failed to list blobs: {}", error_text),
+                cids: None,
+                cursor: None,
+            })
+        }
+    }
+
     /// Export/download a blob from PDS
+    // NEWBOLD.md Step: goat blob export $ACCOUNTDID (line 98) - individual blob download
+    // Implements: Downloads individual blob using com.atproto.sync.getBlob
     #[instrument(skip(self), err)]
     pub async fn export_blob(&self, session: &ClientSessionCredentials, cid: String) -> Result<ClientBlobExportResponse, ClientError> {
         info!("Exporting blob {} from DID: {}", cid, session.did);
 
+        // NEWBOLD.md: com.atproto.sync.getBlob for individual blob retrieval
         let export_url = format!("{}/xrpc/com.atproto.sync.getBlob?did={}&cid={}", session.pds, session.did, cid);
 
         let response = self.http_client
@@ -676,7 +778,7 @@ impl PdsClient {
                 })?;
 
             let blob_data = blob_bytes.to_vec();
-            info!("Blob {} exported successfully, size: {} bytes", cid, blob_data.len());
+            info!("Blob {} exported successfully, size: {} bytes", cid, blob_data.len().to_string());
 
             Ok(ClientBlobExportResponse {
                 success: true,
@@ -696,10 +798,13 @@ impl PdsClient {
     }
 
     /// Upload a blob to PDS
+    // NEWBOLD.md Step: goat blob upload {} (line 104) - individual blob upload
+    // Implements: Uploads individual blob using com.atproto.repo.uploadBlob
     #[instrument(skip(self), err)]
     pub async fn upload_blob(&self, session: &ClientSessionCredentials, cid: String, blob_data: Vec<u8>) -> Result<ClientBlobUploadResponse, ClientError> {
         info!("Uploading blob {} to DID: {}, size: {} bytes", cid, session.did, blob_data.len());
 
+        // NEWBOLD.md: com.atproto.repo.uploadBlob for individual blob upload
         let upload_url = format!("{}/xrpc/com.atproto.repo.uploadBlob", session.pds);
 
         let response = self.http_client
@@ -732,10 +837,13 @@ impl PdsClient {
     }
 
     /// Export preferences from PDS
+    // NEWBOLD.md Step: goat bsky prefs export > prefs.json (line 115)
+    // Implements: Exports Bluesky preferences for migration
     #[instrument(skip(self), err)]
     pub async fn export_preferences(&self, session: &ClientSessionCredentials) -> Result<ClientPreferencesExportResponse, ClientError> {
         info!("Exporting preferences for DID: {}", session.did);
 
+        // NEWBOLD.md: app.bsky.actor.getPreferences for preferences export
         let preferences_url = format!("{}/xrpc/app.bsky.actor.getPreferences", session.pds);
 
         let response = self.http_client
@@ -773,10 +881,13 @@ impl PdsClient {
     }
 
     /// Import preferences to PDS
+    // NEWBOLD.md Step: goat bsky prefs import prefs.json (line 118)
+    // Implements: Imports Bluesky preferences to new PDS
     #[instrument(skip(self), err)]
     pub async fn import_preferences(&self, session: &ClientSessionCredentials, preferences_json: String) -> Result<ClientPreferencesImportResponse, ClientError> {
         info!("Importing preferences for DID: {}", session.did);
 
+        // NEWBOLD.md: app.bsky.actor.putPreferences for preferences import
         let preferences_url = format!("{}/xrpc/app.bsky.actor.putPreferences", session.pds);
 
         // Parse the preferences JSON to extract just the preferences array
@@ -896,6 +1007,8 @@ impl PdsClient {
     }
 
     /// Sign PLC operation with verification token
+    // NEWBOLD.md Step: goat account plc sign --token $PLCTOKEN ./plc_unsigned.json > plc_signed.json (line 141)
+    // Implements: Signs PLC operation with email verification token for identity transition
     #[instrument(skip(self, session, plc_unsigned, token), err)]
     pub async fn sign_plc_operation(
         &self,
@@ -912,6 +1025,7 @@ impl PdsClient {
             })?;
 
         // Construct the PLC signing endpoint URL
+        // NEWBOLD.md: com.atproto.identity.signPlcOperation for PLC operation signing
         let sign_url = format!("{}/xrpc/com.atproto.identity.signPlcOperation", session.pds);
 
         // Create structured payload matching AT Protocol IdentitySignPlcOperation_Input schema
@@ -976,6 +1090,8 @@ impl PdsClient {
     }
 
     /// Submit PLC operation to PDS
+    // NEWBOLD.md Step: goat account plc submit ./plc_signed.json (line 148)
+    // Implements: Submits signed PLC operation to complete identity transition
     #[instrument(skip(self, session, plc_signed), err)]
     pub async fn submit_plc_operation(
         &self,
@@ -991,6 +1107,7 @@ impl PdsClient {
             })?;
 
         // Construct the PLC submission endpoint URL
+        // NEWBOLD.md: com.atproto.identity.submitPlcOperation for PLC operation submission
         let submit_url = format!("{}/xrpc/com.atproto.identity.submitPlcOperation", session.pds);
 
         // Wrap signed operation in IdentitySubmitPlcOperation_Input structure (matches Go implementation)
@@ -1030,6 +1147,8 @@ impl PdsClient {
     }
 
     /// Activate account on PDS
+    // NEWBOLD.md Step: goat account activate (line 157)
+    // Implements: Activates account after successful PLC transition
     #[instrument(skip(self, session), err)]
     pub async fn activate_account(
         &self,
@@ -1038,6 +1157,7 @@ impl PdsClient {
         info!("Activating account for DID: {}", session.did);
 
         // Construct the account activation endpoint URL
+        // NEWBOLD.md: com.atproto.server.activateAccount for final account activation
         let activate_url = format!("{}/xrpc/com.atproto.server.activateAccount", session.pds);
 
         info!("Making account activation request to: {}", activate_url);
@@ -1071,6 +1191,8 @@ impl PdsClient {
     }
 
     /// Deactivate account on PDS
+    // NEWBOLD.md Step: goat account deactivate (line 163)
+    // Implements: Deactivates old account after successful migration
     #[instrument(skip(self, session), err)]
     pub async fn deactivate_account(
         &self,
@@ -1079,6 +1201,7 @@ impl PdsClient {
         info!("Deactivating account for DID: {}", session.did);
 
         // Construct the account deactivation endpoint URL
+        // NEWBOLD.md: com.atproto.server.deactivateAccount for old account deactivation
         let deactivate_url = format!("{}/xrpc/com.atproto.server.deactivateAccount", session.pds);
 
         info!("Making account deactivation request to: {}", deactivate_url);
@@ -1109,6 +1232,87 @@ impl PdsClient {
             Ok(ClientDeactivationResponse {
                 success: false,
                 message: format!("Account deactivation failed: {}", error_text),
+            })
+        }
+    }
+
+    /// Generate service auth token for secure account creation on new PDS
+    /// This implements com.atproto.server.getServiceAuth
+    // NEWBOLD.md Step: goat account service-auth --lxm com.atproto.server.createAccount --aud $NEWPDSSERVICEDID --duration-sec 3600 (line 33)
+    // Implements: Generates service auth token for secure account creation on new PDS
+    #[instrument(skip(self), err)]
+    pub async fn get_service_auth(
+        &self, 
+        session: &ClientSessionCredentials,
+        aud: &str,           // Target PDS service DID  
+        lxm: Option<&str>,   // Method restriction (e.g. com.atproto.server.createAccount)
+        exp: Option<u64>     // Expiration timestamp
+    ) -> Result<ClientServiceAuthResponse, ClientError> {
+        info!("Generating service auth token for audience: {} (method: {:?})", aud, lxm);
+        
+        // NEWBOLD.md: com.atproto.server.getServiceAuth for secure migration auth token
+        let mut service_auth_url = format!("{}/xrpc/com.atproto.server.getServiceAuth", session.pds);
+        let mut query_params = Vec::new();
+        
+        // Required parameter: aud (audience - target PDS service DID)
+        query_params.push(format!("aud={}", aud));
+        
+        // Optional parameter: lxm (method restriction)
+        if let Some(method) = lxm {
+            query_params.push(format!("lxm={}", method));
+        }
+        
+        // Optional parameter: exp (expiration timestamp) 
+        if let Some(expiration) = exp {
+            query_params.push(format!("exp={}", expiration));
+        }
+        
+        // Build URL with query parameters (GET request, not POST)
+        if !query_params.is_empty() {
+            service_auth_url.push('?');
+            service_auth_url.push_str(&query_params.join("&"));
+        }
+
+        let response = self.http_client
+            .get(&service_auth_url)
+            .header("Authorization", format!("Bearer {}", session.access_jwt))
+            .send()
+            .await
+            .map_err(|e| ClientError::NetworkError {
+                message: format!("Failed to call getServiceAuth: {}", e),
+            })?;
+
+        if response.status().is_success() {
+            let auth_data: serde_json::Value = response.json().await
+                .map_err(|e| ClientError::NetworkError {
+                    message: format!("Failed to parse service auth response: {}", e),
+                })?;
+
+            let token = auth_data["token"].as_str().unwrap_or_default().to_string();
+            
+            if token.is_empty() {
+                error!("Service auth token generation returned empty token");
+                return Ok(ClientServiceAuthResponse {
+                    success: false,
+                    message: "Service auth token generation failed: empty token".to_string(),
+                    token: None,
+                });
+            }
+
+            info!("Service auth token generated successfully");
+            Ok(ClientServiceAuthResponse {
+                success: true,
+                message: "Service auth token generated successfully".to_string(),
+                token: Some(token),
+            })
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            error!("Service auth token generation failed: {}", error_text);
+
+            Ok(ClientServiceAuthResponse {
+                success: false,
+                message: format!("Service auth token generation failed: {}", error_text),
+                token: None,
             })
         }
     }
