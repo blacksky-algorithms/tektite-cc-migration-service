@@ -26,7 +26,7 @@ jobs:
           targets: wasm32-unknown-unknown
           
       - name: Cache cargo dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -35,12 +35,45 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
           
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli
+        run: |
+          # Check if dx is already installed and install specific version if not
+          if ! command -v dx &> /dev/null; then
+            echo "Installing Dioxus CLI..."
+            cargo install dioxus-cli --version 0.5.7  # Pin to specific version for reproducibility
+          else
+            echo "Dioxus CLI already installed: $(dx --version)"
+          fi
         
       - name: Build for GitHub Pages
-        run: dx bundle --platform web --package web
+        run: |
+          echo "Building Dioxus web application..."
+          dx bundle --platform web --package web --release
+          
+      - name: Optimize WASM size
+        run: |
+          # Install wasm-opt if not cached
+          if ! command -v wasm-opt &> /dev/null; then
+            npm install -g wasm-opt
+          fi
+          # Optimize all WASM files
+          find ./target/dx/web/release/web/public -name "*.wasm" -exec wasm-opt -Oz {} -o {} \;
+        
+      - name: Create CNAME file for custom domain
+        run: |
+          echo "tektite.cc" > ./target/dx/web/release/web/public/CNAME
+          echo "Created CNAME file for custom domain: tektite.cc"
+          
+      - name: Add 404 page for SPA routing
+        run: |
+          # Copy index.html to 404.html for client-side routing support
+          if [ -f "./target/dx/web/release/web/public/index.html" ]; then
+            cp ./target/dx/web/release/web/public/index.html ./target/dx/web/release/web/public/404.html
+            echo "Created 404.html for SPA routing"
+          fi
         
       - name: Setup Pages
         uses: actions/configure-pages@v5
