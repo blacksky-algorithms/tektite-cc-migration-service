@@ -8,4 +8,7 @@ pub mod features;
 pub mod services;
 pub mod utils;
 
+// Re-export console logging macros for easy use throughout the crate
+// The macros are exported directly from this crate due to #[macro_export]
+
 // All functionality now organized in the new structure

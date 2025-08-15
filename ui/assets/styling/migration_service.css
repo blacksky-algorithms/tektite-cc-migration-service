@@ -728,3 +728,275 @@
         text-align: left;
     }
 }
+
+/* Form 4 Migration Complete Styles */
+.migration-complete-alert {
+    background: #FFFFFF;
+    border: 1px solid #D3FC51;
+    border-radius: 12px;
+    padding: 24px;
+    margin: 16px 0;
+}
+
+.success-icon {
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.success-title {
+    color: #000000;
+    font-size: 1.5rem;
+    font-weight: 600;
+    text-align: center;
+    margin: 0 0 16px 0;
+}
+
+.success-message {
+    color: #000000;
+    font-size: 1rem;
+    line-height: 1.6;
+    text-align: center;
+    margin: 0 0 24px 0;
+}
+
+/* Next Steps Section */
+.next-steps {
+    margin-top: 24px;
+}
+
+.instructions-priority-title,
+.instructions-general-title,
+.instructions-title,
+.instructions-pds-links-title {
+    color: #8B8BFF;
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 24px 0 16px 0;
+    border-bottom: 2px solid #DCDCFF;
+    padding-bottom: 8px;
+}
+
+.fqdn-explanation,
+.pds-links-description {
+    color: #000000;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    margin: 0 0 16px 0;
+}
+
+.priority-steps,
+.general-steps {
+    color: #000000;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    margin: 0 0 20px 0;
+    padding-left: 20px;
+}
+
+.priority-steps li,
+.general-steps li {
+    margin-bottom: 8px;
+}
+
+.priority-steps a,
+.general-steps a {
+    color: #8B8BFF;
+    text-decoration: underline;
+    font-weight: 500;
+}
+
+.priority-steps a:hover,
+.general-steps a:hover {
+    color: #D3FC51;
+}
+
+.dns-note {
+    background: #F2FECB;
+    color: #000000;
+    padding: 12px 16px;
+    border-radius: 8px;
+    border-left: 4px solid #D3FC51;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin: 16px 0 24px 0;
+}
+
+/* PDS Policy Links Section */
+.pds-links-section {
+    background: #DCDCFF;
+    border: 1px solid #8B8BFF;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0 24px 0;
+}
+
+.pds-links-list {
+    color: #000000;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    margin: 8px 0 0 0;
+    padding-left: 20px;
+}
+
+.pds-links-list li {
+    margin-bottom: 8px;
+}
+
+.pds-links-list a {
+    color: #8B8BFF;
+    text-decoration: underline;
+    font-weight: 500;
+    transition: color 0.15s ease;
+}
+
+.pds-links-list a:hover {
+    color: #D3FC51;
+}
+
+/* Video Tutorial Accordion Styles */
+.video-accordion {
+    background: #FFFFFF;
+    border: 2px solid #8B8BFF;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 12px rgba(139, 139, 255, 0.15);
+    overflow: hidden;
+}
+
+.video-accordion-header {
+    width: 100%;
+    background: linear-gradient(135deg, #DCDCFF 0%, rgba(139, 139, 255, 0.1) 100%);
+    border: none;
+    padding: 20px 24px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.video-accordion-header:hover {
+    background: linear-gradient(135deg, #8B8BFF 0%, rgba(139, 139, 255, 0.8) 100%);
+    color: #FFFFFF;
+}
+
+.video-accordion-header:hover .video-accordion-subtitle {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.video-accordion-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #000000;
+    transition: color 0.3s ease;
+}
+
+.video-accordion-icon {
+    font-size: 1.25rem;
+    transition: transform 0.3s ease;
+}
+
+.video-accordion-header:hover .video-accordion-title {
+    color: #FFFFFF;
+}
+
+.video-accordion-subtitle {
+    font-size: 0.875rem;
+    color: #666666;
+    font-weight: 500;
+    margin-left: 37px; /* Align with text after icon */
+    transition: color 0.3s ease;
+}
+
+.video-accordion-content {
+    animation: slideDown 0.3s ease-out;
+    background: #FFFFFF;
+}
+
+.video-accordion-body {
+    padding: 24px;
+    border-top: 1px solid #DCDCFF;
+}
+
+.video-wrapper {
+    position: relative;
+    width: 100%;
+    height: 0;
+    padding-bottom: 56.25%; /* 16:9 aspect ratio */
+    margin-bottom: 16px;
+    background: #f8f8f8;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.video-wrapper iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 8px;
+}
+
+.video-description {
+    color: #000000;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    margin: 0;
+    padding: 12px 16px;
+    background: #DCDCFF;
+    border-left: 4px solid #8B8BFF;
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+}
+
+/* Animations */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        max-height: 500px;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive design for video accordion */
+@media (max-width: 640px) {
+    .video-accordion {
+        margin-bottom: 24px;
+    }
+    
+    .video-accordion-header {
+        padding: 16px 20px;
+    }
+    
+    .video-accordion-title {
+        font-size: 1rem;
+        gap: 10px;
+    }
+    
+    .video-accordion-subtitle {
+        font-size: 0.8125rem;
+        margin-left: 32px;
+    }
+    
+    .video-accordion-body {
+        padding: 20px;
+    }
+    
+    .video-description {
+        font-size: 0.8125rem;
+        padding: 10px 14px;
+    }
+}

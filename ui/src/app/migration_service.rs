@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
-use gloo_console as console;
+use crate::{console_info};
 
 // New import paths after refactoring
+use crate::components::display::VideoAccordion;
 use crate::components::forms::{MigrationDetailsForm, PdsSelectionForm, PlcVerificationForm};
-use crate::features::migration::{MigrationAction, MigrationState, FormStep};
+use crate::features::migration::{FormStep, MigrationAction, MigrationState};
 
 #[cfg(feature = "web")]
 use crate::components::forms::ClientLoginFormComponent;
@@ -14,7 +15,10 @@ use crate::features::migration::storage::LocalStorageManager;
 const MIGRATION_SERVICE_CSS: Asset = asset!("/assets/styling/migration_service.css");
 
 /// Render the appropriate login form based on feature flags
-fn render_login_form(state: Signal<MigrationState>, dispatch: EventHandler<MigrationAction>) -> Element {
+fn render_login_form(
+    state: Signal<MigrationState>,
+    dispatch: EventHandler<MigrationAction>,
+) -> Element {
     #[cfg(feature = "web")]
     {
         rsx! {
@@ -24,7 +28,7 @@ fn render_login_form(state: Signal<MigrationState>, dispatch: EventHandler<Migra
             }
         }
     }
-    
+
     #[cfg(not(feature = "web"))]
     {
         rsx! {
@@ -41,7 +45,7 @@ pub fn MigrationService() -> Element {
     // Check for incomplete migration on startup
     use_effect(move || {
         if LocalStorageManager::has_incomplete_migration() {
-            console::info!(
+            console_info!(
                 "[Migration Service] Incomplete migration detected - resumability available"
             );
             // Could dispatch an action to show resume dialog
@@ -66,6 +70,9 @@ pub fn MigrationService() -> Element {
                 "PDS Migration Service"
             }
 
+            // Video Tutorial Accordion
+            VideoAccordion {}
+
             // Recommendations Banner
             div {
                 class: "recommendations-banner",
@@ -83,7 +90,7 @@ pub fn MigrationService() -> Element {
                 }
             }
 
-            // Form 1: Login to Current PDS - Using Client-side by default  
+            // Form 1: Login to Current PDS - Using Client-side by default
             div {
                 class: if state().current_step == FormStep::PlcVerification { "form-frozen" } else { "" },
                 {render_login_form(state, dispatch)}

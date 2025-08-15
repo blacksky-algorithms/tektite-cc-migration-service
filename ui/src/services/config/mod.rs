@@ -1,6 +1,8 @@
 mod storage_estimator;
 
-pub use storage_estimator::{StorageEstimate, StorageEstimatorError, get_storage_estimate, try_get_storage_estimate};
+pub use storage_estimator::{
+    get_storage_estimate, try_get_storage_estimate, StorageEstimate, StorageEstimatorError,
+};
 
 #[derive(Debug, Clone)]
 pub struct MigrationConfig {
@@ -13,6 +15,9 @@ pub struct MigrationConfig {
 #[derive(Debug, Clone)]
 pub struct BlobConfig {
     pub enumeration_method: BlobEnumerationMethod,
+    pub verification_delay_ms: u64,
+    pub max_verification_attempts: u32,
+    pub verification_backoff_ms: u64,
 }
 
 /// Method for enumerating blobs during migration
@@ -46,11 +51,13 @@ pub struct RetryConfig {
     pub migration_retries: u32,
 }
 
-
 impl Default for BlobConfig {
     fn default() -> Self {
         Self {
             enumeration_method: BlobEnumerationMethod::MissingBlobs, // Default to migration-optimized
+            verification_delay_ms: 3000,    // 3 seconds initial delay after uploads
+            max_verification_attempts: 5,   // Try up to 5 times to verify uploads
+            verification_backoff_ms: 2000,  // 2 seconds linear backoff between attempts
         }
     }
 }
@@ -58,9 +65,9 @@ impl Default for BlobConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            local_storage_limit: 50 * 1024 * 1024,  // 50MB
-            indexeddb_limit: 1024 * 1024 * 1024,    // 1GB
-            opfs_limit: u64::MAX,                    // No limit for OPFS
+            local_storage_limit: 50 * 1024 * 1024, // 50MB
+            indexeddb_limit: 1024 * 1024 * 1024,   // 1GB
+            opfs_limit: u64::MAX,                  // No limit for OPFS
         }
     }
 }
@@ -69,9 +76,9 @@ impl StorageConfig {
     /// Conservative defaults for wasm32-unknown-unknown target
     pub fn conservative_defaults() -> Self {
         Self {
-            local_storage_limit: 5 * 1024 * 1024,   // 5MB (very conservative)
-            indexeddb_limit: 50 * 1024 * 1024,      // 50MB (conservative) 
-            opfs_limit: 100 * 1024 * 1024,          // 100MB (conservative)
+            local_storage_limit: 5 * 1024 * 1024, // 5MB (very conservative)
+            indexeddb_limit: 50 * 1024 * 1024,    // 50MB (conservative)
+            opfs_limit: 100 * 1024 * 1024,        // 100MB (conservative)
         }
     }
 }
@@ -91,10 +98,10 @@ impl ConcurrencyConfig {
     /// Conservative defaults for wasm32-unknown-unknown target
     pub fn conservative_defaults() -> Self {
         Self {
-            max_concurrent_transfers: 5,        // Reduced from 10
-            opfs_concurrency: 5,               // Reduced from 10
-            indexeddb_concurrency: 3,          // Reduced from 5
-            localstorage_concurrency: 1,       // Keep at 1 (unchanged)
+            max_concurrent_transfers: 5, // Reduced from 10
+            opfs_concurrency: 5,         // Reduced from 10
+            indexeddb_concurrency: 3,    // Reduced from 5
+            localstorage_concurrency: 1, // Keep at 1 (unchanged)
         }
     }
 }
@@ -113,9 +120,9 @@ impl RetryConfig {
     /// Conservative defaults for wasm32-unknown-unknown target
     pub fn conservative_defaults() -> Self {
         Self {
-            max_attempts: 3,            // Reduced from 5
-            storage_retries: 2,         // Reduced from 3
-            migration_retries: 2,       // Reduced from 3
+            max_attempts: 3,      // Reduced from 5
+            storage_retries: 2,   // Reduced from 3
+            migration_retries: 2, // Reduced from 3
         }
     }
 }
@@ -136,7 +143,7 @@ impl MigrationConfig {
             blob: BlobConfig::default(),
         }
     }
-    
+
     /// Create configuration enhanced with browser storage information when available
     pub async fn new_with_browser_storage() -> Self {
         match try_get_storage_estimate().await {
@@ -144,16 +151,16 @@ impl MigrationConfig {
             None => Self::new(), // Fallback to conservative defaults
         }
     }
-    
+
     /// Create configuration from browser storage estimate
     fn from_storage_estimate(estimate: StorageEstimate) -> Self {
         let available = estimate.available_bytes();
-        
+
         // Calculate dynamic limits based on available storage
         let local_storage_limit = std::cmp::min(5 * 1024 * 1024, (available as f64 * 0.1) as u64);
-        let indexeddb_limit = std::cmp::min(200 * 1024 * 1024, (available as f64 * 0.3) as u64);  
+        let indexeddb_limit = std::cmp::min(200 * 1024 * 1024, (available as f64 * 0.3) as u64);
         let opfs_limit = std::cmp::min(500 * 1024 * 1024, (available as f64 * 0.5) as u64);
-        
+
         Self {
             storage: StorageConfig {
                 local_storage_limit,
@@ -171,52 +178,47 @@ impl MigrationConfig {
             blob: BlobConfig::default(),
         }
     }
-    
+
     pub fn validate(&self) -> Result<(), String> {
         if self.concurrency.max_concurrent_transfers == 0 {
             return Err("max_concurrent_transfers must be greater than 0".to_string());
         }
-        
+
         if self.retry.max_attempts == 0 {
             return Err("max_attempts must be greater than 0".to_string());
         }
-        
+
         if self.storage.local_storage_limit == 0 {
             return Err("local_storage_limit must be greater than 0".to_string());
         }
-        
+
         Ok(())
     }
 }
 
-use std::sync::Once;
+use std::sync::OnceLock;
 
-static INIT: Once = Once::new();
-static mut GLOBAL_CONFIG: Option<MigrationConfig> = None;
+static GLOBAL_CONFIG: OnceLock<MigrationConfig> = OnceLock::new();
 
 /// Get the global configuration, initialized with conservative defaults
 pub fn get_global_config() -> MigrationConfig {
-    unsafe {
-        INIT.call_once(|| {
-            let config = MigrationConfig::new();
-            if let Err(e) = config.validate() {
-                web_sys::console::warn_1(&format!("Invalid configuration: {}", e).into());
-                GLOBAL_CONFIG = Some(MigrationConfig::new());
-            } else {
-                GLOBAL_CONFIG = Some(config);
-            }
-        });
-        GLOBAL_CONFIG.as_ref().unwrap().clone()
-    }
+    GLOBAL_CONFIG.get_or_init(|| {
+        let config = MigrationConfig::new();
+        if let Err(e) = config.validate() {
+            web_sys::console::warn_1(&format!("Invalid configuration: {}", e).into());
+            MigrationConfig::new()
+        } else {
+            config
+        }
+    }).clone()
 }
 
 /// Initialize global configuration with browser storage integration (async version)
 /// Call this early in your application startup for best results
 pub async fn init_global_config_with_browser_storage() {
-    INIT.call_once(|| {
-        // We can't await here, so we'll fall back to sync initialization
-        // The async version should be called separately
-    });
+    // With OnceLock, initialization happens automatically on first access
+    // This function serves as a way to trigger initialization early if needed
+    let _ = get_global_config();
 }
 
 /// Get or create configuration with browser storage integration
