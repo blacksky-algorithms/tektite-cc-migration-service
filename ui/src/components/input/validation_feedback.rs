@@ -1,4 +1,4 @@
-use crate::features::migration::{HandleValidation, PasswordValidation, EmailValidation};
+use crate::features::migration::{EmailValidation, HandleValidation, PasswordValidation};
 use dioxus::prelude::*;
 
 #[derive(Props, PartialEq, Clone)]

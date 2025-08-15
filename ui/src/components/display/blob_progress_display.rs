@@ -27,7 +27,7 @@ pub fn BlobProgressDisplay(props: BlobProgressDisplayProps) -> Element {
     rsx! {
         div {
             class: "blob-progress-container",
-            
+
             h4 {
                 class: "blob-progress-title",
                 "Blob Transfer Progress"

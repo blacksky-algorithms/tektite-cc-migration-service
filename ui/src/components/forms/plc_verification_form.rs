@@ -1,14 +1,12 @@
 use dioxus::prelude::*;
-use gloo_console as console;
+// Import console macros from our crate
+use crate::{console_error, console_info, console_warn};
 
 use crate::components::input::{InputType, ValidatedInput};
 use crate::features::migration::*;
 
+use crate::features::migration::{logic::convert_session_to_client, storage::LocalStorageManager};
 use crate::services::client::PdsClient;
-use crate::features::migration::{
-    storage::LocalStorageManager,
-    logic::convert_session_to_client,
-};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct PlcVerificationFormProps {
@@ -20,7 +18,11 @@ pub struct PlcVerificationFormProps {
 pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
     let state = props.state;
     let dispatch = props.dispatch;
-    let handle = format!("{}{}",state().get_handle_prefix(),state().get_domain_suffix());
+    let handle = format!(
+        "{}{}",
+        state().get_handle_prefix(),
+        state().get_domain_suffix()
+    );
 
     rsx! {
         div {
@@ -108,7 +110,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                         dispatch.call(MigrationAction::SetMigrationError(None));
 
                         spawn(async move {
-                            console::info!("[Form4] Starting PLC operation signing with verification code");
+                            console_info!("[Form4] Starting PLC operation signing with verification code");
 
                             // Create PDS client for API calls
                             let pds_client = PdsClient::new();
@@ -125,7 +127,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             let old_session = match old_session_result {
                                 Ok(session) => session,
                                 Err(error) => {
-                                    console::error!("[Form4] Failed to get old session: {}", error);
+                                    console_error!("{}", format!("[Form4] Failed to get old session: {}", error));
                                     dispatch.call(MigrationAction::SetMigrationError(Some(error.to_string())));
                                     dispatch.call(MigrationAction::SetPlcVerifying(false));
                                     return;
@@ -135,7 +137,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             let new_session = match new_session_result {
                                 Ok(session) => session,
                                 Err(error) => {
-                                    console::error!("[Form4] Failed to get new session: {}", error);
+                                    console_error!("{}", format!("[Form4] Failed to get new session: {}", error));
                                     dispatch.call(MigrationAction::SetMigrationError(Some(error.to_string())));
                                     dispatch.call(MigrationAction::SetPlcVerifying(false));
                                     return;
@@ -143,24 +145,24 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             };
 
                             // Step 17: Sign PLC operation with verification code
-                            console::info!("[Form4] Step 17: Signing PLC operation");
+                            console_info!("[Form4] Step 17: Signing PLC operation");
                             dispatch.call(MigrationAction::SetMigrationStep("Signing PLC operation...".to_string()));
 
                             let plc_signed = match pds_client.sign_plc_operation(&old_session, plc_unsigned, verification_code).await {
                                 Ok(response) => {
                                     if response.success {
-                                        console::info!("[Form4] PLC operation signed successfully");
+                                        console_info!("[Form4] PLC operation signed successfully");
                                         response.plc_signed.unwrap_or_default()
                                     } else {
                                         let error_msg = response.message.clone();
-                                        console::error!("[Form4] PLC signing failed: {}", error_msg);
+                                        console_error!("{}", format!("[Form4] PLC signing failed: {}", error_msg));
                                         dispatch.call(MigrationAction::SetMigrationError(Some(response.message)));
                                         dispatch.call(MigrationAction::SetPlcVerifying(false));
                                         return;
                                     }
                                 }
                                 Err(e) => {
-                                    console::error!("[Form4] PLC signing client operation failed: {}", format!("{}", e));
+                                    console_error!("{}", format!("[Form4] PLC signing client operation failed: {}", e));
                                     dispatch.call(MigrationAction::SetMigrationError(Some(format!("Failed to sign PLC operation: {}", e))));
                                     dispatch.call(MigrationAction::SetPlcVerifying(false));
                                     return;
@@ -173,23 +175,23 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             dispatch.call(MigrationAction::SetPlcProgress(plc_progress.clone()));
 
                             // Step 18: Submit PLC operation to new PDS
-                            console::info!("[Form4] Step 18: Submitting PLC operation");
+                            console_info!("[Form4] Step 18: Submitting PLC operation");
                             dispatch.call(MigrationAction::SetMigrationStep("Submitting PLC operation...".to_string()));
 
                             match pds_client.submit_plc_operation(&new_session, plc_signed).await {
                                 Ok(response) => {
                                     if response.success {
-                                        console::info!("[Form4] PLC operation submitted successfully");
+                                        console_info!("[Form4] PLC operation submitted successfully");
                                     } else {
                                         let error_msg = response.message.clone();
-                                        console::error!("[Form4] PLC submission failed: {}", error_msg);
+                                        console_error!("{}", format!("[Form4] PLC submission failed: {}", error_msg));
                                         dispatch.call(MigrationAction::SetMigrationError(Some(response.message)));
                                         dispatch.call(MigrationAction::SetPlcVerifying(false));
                                         return;
                                     }
                                 }
                                 Err(e) => {
-                                    console::error!("[Form4] PLC submission client operation failed: {}", format!("{}", e));
+                                    console_error!("{}", format!("[Form4] PLC submission client operation failed: {}", e));
                                     dispatch.call(MigrationAction::SetMigrationError(Some(format!("Failed to submit PLC operation: {}", e))));
                                     dispatch.call(MigrationAction::SetPlcVerifying(false));
                                     return;
@@ -201,23 +203,23 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             dispatch.call(MigrationAction::SetPlcProgress(plc_progress.clone()));
 
                             // Step 19: Activate account on new PDS
-                            console::info!("[Form4] Step 19: Activating account on new PDS");
+                            console_info!("[Form4] Step 19: Activating account on new PDS");
                             dispatch.call(MigrationAction::SetMigrationStep("Activating account on new PDS...".to_string()));
 
                             match pds_client.activate_account(&new_session).await {
                                 Ok(response) => {
                                     if response.success {
-                                        console::info!("[Form4] New account activated successfully");
+                                        console_info!("[Form4] New account activated successfully");
                                     } else {
                                         let error_msg = response.message.clone();
-                                        console::error!("[Form4] Account activation failed: {}", error_msg);
+                                        console_error!("{}", format!("[Form4] Account activation failed: {}", error_msg));
                                         dispatch.call(MigrationAction::SetMigrationError(Some(response.message)));
                                         dispatch.call(MigrationAction::SetPlcVerifying(false));
                                         return;
                                     }
                                 }
                                 Err(e) => {
-                                    console::error!("[Form4] Account activation client operation failed: {}", format!("{}", e));
+                                    console_error!("{}", format!("[Form4] Account activation client operation failed: {}", e));
                                     dispatch.call(MigrationAction::SetMigrationError(Some(format!("Failed to activate new account: {}", e))));
                                     dispatch.call(MigrationAction::SetPlcVerifying(false));
                                     return;
@@ -230,7 +232,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             dispatch.call(MigrationAction::SetMigrationProgress(migration_progress.clone()));
 
                             // Step 20: Deactivate account on old PDS
-                            console::info!("[Form4] Step 20: Deactivating account on old PDS");
+                            console_info!("[Form4] Step 20: Deactivating account on old PDS");
                             dispatch.call(MigrationAction::SetMigrationStep("Deactivating account on old PDS...".to_string()));
 
                             // Get old session again for deactivation
@@ -239,7 +241,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                                 .map(|session| convert_session_to_client(&session)) {
                                 Ok(session) => session,
                                 Err(error) => {
-                                    console::warn!("[Form4] Failed to get old session for deactivation: {}", error);
+                                    console_warn!("{}", format!("[Form4] Failed to get old session for deactivation: {}", error));
                                     // This is not critical - migration is essentially complete
                                     dispatch.call(MigrationAction::SetMigrationStep("Migration completed! (Note: Could not deactivate old account - please do this manually)".to_string()));
                                     dispatch.call(MigrationAction::SetPlcVerifying(false));
@@ -250,7 +252,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             match pds_client.deactivate_account(&old_session_for_deactivation).await {
                                 Ok(response) => {
                                     if response.success {
-                                        console::info!("[Form4] Old account deactivated successfully");
+                                        console_info!("[Form4] Old account deactivated successfully");
 
                                         // Update final migration progress
                                         migration_progress.old_account_deactivated = true;
@@ -259,17 +261,17 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                                         dispatch.call(MigrationAction::SetMigrationStep("Migration completed successfully! Your account has been migrated to the new PDS.".to_string()));
                                     } else {
                                         let error_msg = response.message.clone();
-                                        console::warn!("[Form4] Old account deactivation failed: {}", error_msg);
+                                        console_warn!("{}", format!("[Form4] Old account deactivation failed: {}", error_msg));
                                         dispatch.call(MigrationAction::SetMigrationStep(format!("Migration completed! New account activated, but old account deactivation failed: {}. Please deactivate it manually.", response.message)));
                                     }
                                 }
                                 Err(e) => {
-                                    console::warn!("[Form4] Old account deactivation client operation failed: {}", format!("{}", e));
+                                    console_warn!("{}", format!("[Form4] Old account deactivation client operation failed: {}", e));
                                     dispatch.call(MigrationAction::SetMigrationStep("Migration completed! New account activated, but could not deactivate old account. Please deactivate it manually.".to_string()));
                                 }
                             };
 
-                            console::info!("[Form4] Migration process completed!");
+                            console_info!("[Form4] Migration process completed!");
                             dispatch.call(MigrationAction::SetPlcVerifying(false));
                             dispatch.call(MigrationAction::SetMigrationCompleted(true));
                         });
@@ -299,16 +301,61 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             class: "success-message",
                             "Your account has been successfully migrated to the new PDS. You can now use your new handle and all your data has been transferred."
                         }
+                        // Post-migration instructions for all users
                         div {
-                            class: "next-steps",
-                            "Next steps:",
+                            class: "next-steps general-instructions",
+                            h4 {
+                                class: "instructions-title",
+                                "📋 Post-Migration Steps"
+                            }
                             ul {
+                                class: "general-steps",
                                 li { "Update your handle in any external applications" }
                                 li { "Verify your posts and follows are intact" }
                                 li { "Your old account has been deactivated" }
-                                li { "If you see an invalid handle error, please make a post/skeet with your new handle @{handle}" }
-                                li { "Re-enable 2FA is recommended" }
-                                li { "You might see an invalid handle warning for about 20 minutes. This is a feature with the PDS servers." }
+                                li { "If you see an invalid handle error, make a post/skeet with your new handle @{handle}" }
+                                li { "Re-enable 2FA (recommended)" }
+                                li { "Note: Invalid handle warnings may appear for ~20 minutes (this is normal)" }
+                            }
+
+                            // Add PDS policy links if available
+                            if let Some(describe_response) = &state().form2.describe_response {
+                                if let Some(links) = &describe_response.links {
+                                    if links.privacy_policy.is_some() || links.terms_of_service.is_some() {
+                                        h4 {
+                                            class: "instructions-pds-links-title",
+                                            "📋 New PDS Policies"
+                                        }
+                                        div {
+                                            class: "pds-links-section",
+                                            p {
+                                                class: "pds-links-description",
+                                                "Your new PDS provides the following policy documents:"
+                                            }
+                                            ul {
+                                                class: "pds-links-list",
+                                                if let Some(privacy_url) = &links.privacy_policy {
+                                                    li {
+                                                        a {
+                                                            href: "{privacy_url}",
+                                                            target: "_blank",
+                                                            "Privacy Policy"
+                                                        }
+                                                    }
+                                                }
+                                                if let Some(terms_url) = &links.terms_of_service {
+                                                    li {
+                                                        a {
+                                                            href: "{terms_url}",
+                                                            target: "_blank",
+                                                            "Terms of Service"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

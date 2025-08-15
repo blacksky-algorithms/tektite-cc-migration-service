@@ -1,19 +1,17 @@
 //! Client-side login form using DNS-over-HTTPS and direct PDS operations
 
 #[cfg(feature = "web")]
-use crate::services::client::{MigrationClient, ClientPdsProvider, JwtUtils};
+use crate::services::client::{ClientPdsProvider, JwtUtils, MigrationClient};
 
 use dioxus::prelude::*;
-use gloo_console as console;
+// Import console macros from our crate
+use crate::{console_log, console_error, console_info, console_warn};
 
 use crate::components::{
-    input::{InputType, ValidatedInput},
     display::ProviderDisplay,
+    input::{InputType, ValidatedInput},
 };
-use crate::features::migration::{
-    storage::LocalStorageManager,
-    *,
-};
+use crate::features::migration::{storage::LocalStorageManager, *};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct ClientLoginFormComponentProps {
@@ -30,7 +28,7 @@ fn should_resolve_handle(handle: &str) -> bool {
     handle.chars().last().is_some_and(|c| c.is_alphabetic()) &&
     !handle.ends_with('.') &&  // Don't resolve incomplete handles like "torrho."
     handle.split('.').count() >= 2 &&  // Must have at least domain.tld
-    !handle.contains(' ')  // No spaces allowed
+    !handle.contains(' ') // No spaces allowed
 }
 
 #[cfg(feature = "web")]
@@ -38,7 +36,7 @@ fn should_resolve_handle(handle: &str) -> bool {
 pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element {
     let state = props.state;
     let dispatch = props.dispatch;
-    
+
     // Use local state to track the current request ID to prevent race conditions
     let mut request_counter = use_signal(|| 0u32);
 
@@ -70,41 +68,41 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
 
                         // Clear provider immediately when input changes
                         dispatch.call(MigrationAction::SetProvider(ClientPdsProvider::None));
-                        
+
                         let trimmed_data = data.trim();
-                        
+
                         // Handle DID inputs differently (no resolution needed)
                         if trimmed_data.starts_with("did:") {
                             dispatch.call(MigrationAction::SetLoading(false));
                             return;
                         }
-                        
+
                         // Skip empty inputs
                         if trimmed_data.is_empty() {
                             dispatch.call(MigrationAction::SetLoading(false));
                             return;
                         }
-                        
+
                         // Skip obviously incomplete/invalid handles to prevent unnecessary network calls
                         if !should_resolve_handle(trimmed_data) {
-                            console::log!("Skipping provider resolution for incomplete handle:", trimmed_data);
+                            console_log!("Skipping provider resolution for incomplete handle: {}", trimmed_data);
                             dispatch.call(MigrationAction::SetLoading(false));
                             return;
                         }
-                        
+
                         // Increment request counter to track this request
                         let current_request_id = {
                             let new_id = request_counter() + 1;
                             request_counter.set(new_id);
                             new_id
                         };
-                        
-                        console::log!(&format!("Starting provider resolution for '{}' (request {})", trimmed_data, current_request_id));
+
+                        console_log!("Starting provider resolution for '{}' (request {})", trimmed_data, current_request_id);
                         dispatch.call(MigrationAction::SetLoading(true));
-                        
+
                         // Use a cloned version of the data for the async task
                         let data_for_async = trimmed_data.to_string();
-                        
+
                         spawn(async move {
                             // Add a small delay to debounce rapid keystrokes
                             #[cfg(target_arch = "wasm32")]
@@ -112,26 +110,26 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                                 use gloo_timers::future::TimeoutFuture;
                                 TimeoutFuture::new(300).await; // 300ms debounce
                             }
-                            
+
                             // Check if this is still the most recent request
                             let current_counter = request_counter();
                             if current_request_id != current_counter {
-                                console::log!(&format!("Ignoring outdated provider resolution request {} (current: {})", current_request_id, current_counter));
+                                console_log!("Ignoring outdated provider resolution request {} (current: {})", current_request_id, current_counter);
                                 return;
                             }
-                            
-                            console::log!(&format!("Executing provider resolution for '{}' (request {})", data_for_async, current_request_id));
-                            
+
+                            console_log!("Executing provider resolution for '{}' (request {})", data_for_async, current_request_id);
+
                             let migration_client = MigrationClient::new();
                             let provider = migration_client.determine_provider(&data_for_async).await;
-                            
+
                             // Final check - only update if this is still the most recent request
                             if current_request_id == request_counter() {
-                                console::log!(&format!("Provider resolution completed for '{}': {:?} (request {})", data_for_async, provider, current_request_id));
+                                console_log!("Provider resolution completed for '{}': {:?} (request {})", data_for_async, provider, current_request_id);
                                 dispatch.call(MigrationAction::SetProvider(provider));
                                 dispatch.call(MigrationAction::SetLoading(false));
                             } else {
-                                console::log!(&format!("Discarding outdated provider resolution result for request {}", current_request_id));
+                                console_log!("Discarding outdated provider resolution result for request {}", current_request_id);
                             }
                         });
                     }
@@ -192,17 +190,17 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                                         if let Some(ref client_session) = response.session {
                                             // Check if token is expired or will expire soon
                                             if JwtUtils::needs_refresh(&client_session.access_jwt) {
-                                                console::warn!("JWT token needs refresh, but continuing with login");
+                                                console_warn!("JWT token needs refresh, but continuing with login");
                                             }
-                                            
+
                                             // Store session in localStorage as "old_pds_session" for migration
                                             match LocalStorageManager::store_client_session_as_old(client_session) {
                                                 Ok(()) => {
-                                                    console::info!("Client-side login successful - session stored in localStorage");
+                                                    console_info!("Client-side login successful - session stored in localStorage");
                                                     dispatch.call(MigrationAction::SetSessionStored(true));
                                                 }
                                                 Err(e) => {
-                                                    console::error!("Failed to store session:", format!("{:?}", e));
+                                                    console_error!("Failed to store session: {:?}", e);
                                                     dispatch.call(MigrationAction::SetLoginResponse(Some(PdsLoginResponse {
                                                         success: false,
                                                         message: format!("Failed to store session: {:?}", e),
@@ -214,7 +212,7 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                                                 }
                                             }
                                         } else {
-                                            console::error!("Login successful but no session returned");
+                                            console_error!("Login successful but no session returned");
                                             dispatch.call(MigrationAction::SetLoginResponse(Some(PdsLoginResponse {
                                                 success: false,
                                                 message: "Login successful but no session returned".to_string(),
@@ -225,7 +223,7 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                                             return;
                                         }
                                     }
-                                    
+
                                     // Convert client response to API response format for compatibility
                                     let api_response = PdsLoginResponse {
                                         success: response.success,
@@ -242,7 +240,7 @@ pub fn ClientLoginFormComponent(props: ClientLoginFormComponentProps) -> Element
                                     dispatch.call(MigrationAction::SetLoginResponse(Some(api_response)));
                                 }
                                 Err(e) => {
-                                    console::error!("Client-side login failed:", format!("{}", e));
+                                    console_error!("Client-side login failed: {}", e);
                                     dispatch.call(MigrationAction::SetLoginResponse(Some(PdsLoginResponse {
                                         success: false,
                                         message: format!("Client-side login error: {}", e),

@@ -5,8 +5,8 @@ use dioxus::prelude::*;
 use crate::services::client::compat::{describe_server, resolve_handle_shared};
 
 use crate::components::{
-    input::{InputType, ValidatedInput},
     display::LoadingIndicator,
+    input::{InputType, ValidatedInput},
 };
 use crate::features::migration::*;
 
@@ -86,13 +86,13 @@ pub fn PdsSelectionForm(props: PdsSelectionFormProps) -> Element {
                                     }
                                 }
                             }
-                            
+
                             #[cfg(not(feature = "web"))]
                             {
                                 // Fallback - set error state
                                 dispatch.call(MigrationAction::SetPdsDescribeResponse(None));
                             }
-                            
+
                             dispatch.call(MigrationAction::SetDescribingPds(false));
                         });
                     },
@@ -168,13 +168,13 @@ pub fn PdsSelectionForm(props: PdsSelectionFormProps) -> Element {
                                         }
                                     }
                                 }
-                                
+
                                 #[cfg(not(feature = "web"))]
                                 {
                                     // Fallback - set error state
                                     dispatch.call(MigrationAction::SetPdsDescribeResponse(None));
                                 }
-                                
+
                                 dispatch.call(MigrationAction::SetDescribingPds(false));
                             });
                         }

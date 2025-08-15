@@ -2,8 +2,10 @@ use dioxus::prelude::*;
 
 use crate::components::{
     display::BlobProgressDisplay,
-    input::{EmailValidationFeedback, HandleValidationFeedback, InputType,
-        PasswordValidationFeedback, ValidatedInput},
+    input::{
+        EmailValidationFeedback, HandleValidationFeedback, InputType, PasswordValidationFeedback,
+        ValidatedInput,
+    },
 };
 use crate::features::migration::{
     form_validation::{get_form3_validation_message, validate_form3_complete},
@@ -14,7 +16,7 @@ use crate::utils::validation::{
     password_validation_style, validation_class, validation_style,
 };
 
-// Import client-side components  
+// Import client-side components
 #[cfg(feature = "web")]
 use crate::services::client::WebIdentityResolver;
 
@@ -76,7 +78,7 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
                             // Combine prefix with domain suffix to create full handle
                             let domain_suffix = state().get_domain_suffix();
                             let full_handle = format!("{}{}", prefix_value, domain_suffix);
-                            
+
                             dispatch.call(MigrationAction::SetNewHandle(full_handle.clone()));
 
                             // Validate handle availability if prefix is not empty
@@ -269,44 +271,6 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
                     div {
                         class: "migration-success",
                         "Migration setup completed successfully! New PDS session stored."
-
-                        // Show post-migration instructions for FQDN handles
-                        if state().is_original_handle_fqdn() {
-                            div {
-                                class: "post-migration-instructions",
-                                h4 {
-                                    class: "instructions-title",
-                                    "Post-Migration DNS Setup Instructions"
-                                }
-                                p {
-                                    "Since you used a custom domain handle ({state().form1.original_handle}), please complete these final steps:"
-                                }
-                                ol {
-                                    class: "instructions-list",
-                                    li {
-                                        "Login with your new handle: {state().form3.handle} at "
-                                        a {
-                                            href: "https://blacksky.community/",
-                                            target: "_blank",
-                                            "https://blacksky.community/"
-                                        }
-                                    }
-                                    li {
-                                        "Go to Settings > Account > Handle > \"I Have My Own Domain\""
-                                    }
-                                    li {
-                                        "Enter your original domain: {state().form1.original_handle}"
-                                    }
-                                    li {
-                                        "Click \"Verify DNS Record\" to complete the setup"
-                                    }
-                                }
-                                p {
-                                    class: "instructions-note",
-                                    "After DNS verification, you'll be able to use your original domain handle again."
-                                }
-                            }
-                        }
                     }
                 } else {
                     div {

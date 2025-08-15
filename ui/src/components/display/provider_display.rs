@@ -1,6 +1,6 @@
 use crate::components::display::LoadingIndicator;
-use dioxus::prelude::*;
 use crate::services::client::ClientPdsProvider;
+use dioxus::prelude::*;
 
 const BLUESKY_LOGO: Asset = asset!("/assets/img/bluesky_logo.svg");
 const BLACKSKY_LOGO: Asset = asset!("/assets/img/blacksky_logo.svg");

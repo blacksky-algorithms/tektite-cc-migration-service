@@ -43,27 +43,58 @@ impl MigrationState {
         Some(suggestion)
     }
 
-    /// Check if the original handle is a fully qualified domain name (FQDN)
+    /// Check if the original handle is a custom domain requiring DNS setup
+    /// 
+    /// This distinguishes between:
+    /// - PDS subdomains (e.g., "tektitef5.bsky.social" on PDS offering ".bsky.social") - returns false
+    /// - True custom domains (e.g., "slavecodes.org" DNS-verified) - returns true
     pub fn is_original_handle_fqdn(&self) -> bool {
         let original = &self.form1.original_handle;
-        
+
         if original.is_empty() || original.starts_with("did:") {
+            return false;
+        }
+
+        // Must contain a dot to be a domain
+        if !original.contains('.') {
             return false;
         }
 
         // Check if we have a PDS response with available domains
         if let Some(describe_response) = &self.form2.describe_response {
             let available_domains = &describe_response.available_user_domains;
-            
-            // If the handle doesn't match any available user domain, it's likely an FQDN
-            let matches_available_domain = available_domains
-                .iter()
-                .any(|domain| original.ends_with(domain.as_str()));
-            
-            return !matches_available_domain && original.contains('.');
+
+            // Check if the handle is a subdomain of any availableUserDomains
+            // E.g., "tektitef5.bsky.social" matches ".bsky.social" domain
+            for domain in available_domains {
+                let domain_suffix = domain.trim();
+                let original_lower = original.trim().to_lowercase();
+                
+                // Handle domain suffix with or without leading dot
+                let normalized_suffix = if domain_suffix.starts_with('.') {
+                    domain_suffix.to_lowercase()
+                } else {
+                    format!(".{}", domain_suffix.to_lowercase())
+                };
+                
+                // If original handle ends with this domain suffix, it's a PDS subdomain, not a custom domain
+                if original_lower.ends_with(&normalized_suffix) {
+                    // Additional check: ensure it's actually a subdomain (has prefix)
+                    let prefix = original_lower.trim_end_matches(&normalized_suffix);
+                    if !prefix.is_empty() && !prefix.contains('.') {
+                        // This is a simple subdomain like "username.bsky.social"
+                        return false;
+                    }
+                }
+            }
+
+            // If we get here, the handle doesn't match any availableUserDomains
+            // This indicates it's likely a custom domain that requires DNS verification
+            return true;
         }
-        
-        false
+
+        // Fallback: if no PDS response, assume domains with dots are custom
+        true
     }
 
     /// Get the domain suffix for the new handle (from PDS availableUserDomains)
@@ -80,7 +111,7 @@ impl MigrationState {
     pub fn get_handle_prefix(&self) -> String {
         let full_handle = &self.form3.handle;
         let domain_suffix = self.get_domain_suffix();
-        
+
         if full_handle.ends_with(&domain_suffix) {
             full_handle.trim_end_matches(&domain_suffix).to_string()
         } else {
