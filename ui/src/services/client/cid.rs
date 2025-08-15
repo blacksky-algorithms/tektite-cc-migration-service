@@ -1,19 +1,19 @@
 //! CID (Content Identifier) validation and type safety for AT Protocol
-//! 
+//!
 //! This module provides CID validation matching the Go atproto/syntax implementation
 //! to ensure compatibility and security.
 
+use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
-use regex::Regex;
 
 /// A validated CID (Content Identifier) string for AT Protocol
-/// 
+///
 /// This type ensures CIDs conform to AT Protocol requirements:
 /// - Length between 8-256 characters
 /// - Valid base58/base32 characters only  
 /// - CIDv1 format (no CIDv0 allowed)
-/// 
+///
 /// Always use `Cid::parse()` instead of creating directly from strings,
 /// especially with network input.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,7 +21,7 @@ pub struct Cid(String);
 
 impl Cid {
     /// Parse and validate a CID string
-    /// 
+    ///
     /// Returns an error if the CID doesn't meet AT Protocol requirements:
     /// - Must be 8-256 characters long
     /// - Must match CID character pattern
@@ -30,33 +30,33 @@ impl Cid {
         if raw.is_empty() {
             return Err(CidError::Empty);
         }
-        
+
         if raw.len() > 256 {
             return Err(CidError::TooLong);
         }
-        
+
         if raw.len() < 8 {
             return Err(CidError::TooShort);
         }
-        
+
         // Validate CID character pattern (matches Go regex: ^[a-zA-Z0-9+=]{8,256}$)
         if !is_valid_cid_pattern(raw) {
             return Err(CidError::InvalidFormat);
         }
-        
+
         // Reject CIDv0 format (security requirement from Go implementation)
         if raw.starts_with("Qmb") {
             return Err(CidError::CidV0NotAllowed);
         }
-        
+
         Ok(Cid(raw.to_string()))
     }
-    
+
     /// Get the CID as a string slice
     pub fn as_str(&self) -> &str {
         &self.0
     }
-    
+
     /// Convert to owned string
     pub fn into_string(self) -> String {
         self.0
@@ -147,17 +147,24 @@ mod tests {
 
     #[test]
     fn test_invalid_characters() {
-        assert_eq!(Cid::parse("invalid@cid#here!"), Err(CidError::InvalidFormat));
+        assert_eq!(
+            Cid::parse("invalid@cid#here!"),
+            Err(CidError::InvalidFormat)
+        );
     }
 
     #[test]
     fn test_cidv0_rejected() {
-        assert_eq!(Cid::parse("QmbWqxBEKC3P8tqsKc98xmWNzrzDtRLMiMPL8wBuTGsMnR"), Err(CidError::CidV0NotAllowed));
+        assert_eq!(
+            Cid::parse("QmbWqxBEKC3P8tqsKc98xmWNzrzDtRLMiMPL8wBuTGsMnR"),
+            Err(CidError::CidV0NotAllowed)
+        );
     }
 
     #[test]
     fn test_serde_roundtrip() {
-        let original = Cid::parse("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi").unwrap();
+        let original =
+            Cid::parse("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi").unwrap();
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: Cid = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);

@@ -5,25 +5,14 @@ use tracing::{info, warn};
 #[cfg(target_arch = "wasm32")]
 use js_sys;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-
 /// Get current time in seconds since UNIX epoch (WASM compatible)
 #[cfg(target_arch = "wasm32")]
 fn current_time_secs() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn current_time_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
-use super::types::ClientSessionCredentials;
 use super::errors::ClientError;
+use super::types::ClientSessionCredentials;
 use crate::features::migration::types::MigrationProgress;
 
 /// Session manager for secure credential storage and management
@@ -51,21 +40,23 @@ impl SessionManager {
 
     /// Store session credentials securely
     pub fn store_session(&self, session: &ClientSessionCredentials) -> Result<(), ClientError> {
-        let session_json = serde_json::to_string(session)
-            .map_err(|e| ClientError::SerializationError {
+        let session_json =
+            serde_json::to_string(session).map_err(|e| ClientError::SerializationError {
                 message: format!("Failed to serialize session: {}", e),
             })?;
 
         if self.use_session_storage {
-            SessionStorage::set(&self.storage_key, session_json)
-                .map_err(|e| ClientError::StorageError {
+            SessionStorage::set(&self.storage_key, session_json).map_err(|e| {
+                ClientError::StorageError {
                     message: format!("Failed to store session in sessionStorage: {:?}", e),
-                })?;
+                }
+            })?;
         } else {
-            LocalStorage::set(&self.storage_key, session_json)
-                .map_err(|e| ClientError::StorageError {
+            LocalStorage::set(&self.storage_key, session_json).map_err(|e| {
+                ClientError::StorageError {
                     message: format!("Failed to store session in localStorage: {:?}", e),
-                })?;
+                }
+            })?;
         }
 
         info!("Session stored securely for DID: {}", session.did);
@@ -86,11 +77,11 @@ impl SessionManager {
             }
         };
 
-        let session: ClientSessionCredentials = serde_json::from_str(&session_json)
-            .map_err(|e| ClientError::SerializationError {
+        let session: ClientSessionCredentials =
+            serde_json::from_str(&session_json).map_err(|e| ClientError::SerializationError {
                 message: format!("Failed to deserialize session: {}", e),
             })?;
-        
+
         // Check if session is expired
         if session.is_expired() {
             warn!("Stored session is expired for DID: {}", session.did);
@@ -123,10 +114,10 @@ impl SessionManager {
 
     /// Update session with new tokens (for token refresh)
     pub fn update_session_tokens(
-        &self, 
-        access_jwt: String, 
-        refresh_jwt: String, 
-        expires_at: Option<u64>
+        &self,
+        access_jwt: String,
+        refresh_jwt: String,
+        expires_at: Option<u64>,
     ) -> Result<(), ClientError> {
         if let Some(mut session) = self.get_session()? {
             session.access_jwt = access_jwt;
@@ -139,34 +130,40 @@ impl SessionManager {
     }
 
     /// Store migration progress for a DID
-    pub fn store_migration_progress(&self, did: &str, progress: &MigrationProgress) -> Result<(), ClientError> {
+    pub fn store_migration_progress(
+        &self,
+        did: &str,
+        progress: &MigrationProgress,
+    ) -> Result<(), ClientError> {
         let storage_key = format!("migration_progress_{}", did);
-        let progress_json = serde_json::to_string(progress)
-            .map_err(|e| ClientError::SerializationError {
+        let progress_json =
+            serde_json::to_string(progress).map_err(|e| ClientError::SerializationError {
                 message: format!("Failed to serialize migration progress: {}", e),
             })?;
 
         // Always use localStorage for migration progress (needs persistence across sessions)
-        LocalStorage::set(&storage_key, progress_json)
-            .map_err(|e| ClientError::StorageError {
-                message: format!("Failed to store migration progress: {:?}", e),
-            })?;
+        LocalStorage::set(&storage_key, progress_json).map_err(|e| ClientError::StorageError {
+            message: format!("Failed to store migration progress: {:?}", e),
+        })?;
 
         info!("Migration progress stored for DID: {}", did);
         Ok(())
     }
 
     /// Get migration progress for a DID
-    pub fn get_migration_progress(&self, did: &str) -> Result<Option<MigrationProgress>, ClientError> {
+    pub fn get_migration_progress(
+        &self,
+        did: &str,
+    ) -> Result<Option<MigrationProgress>, ClientError> {
         let storage_key = format!("migration_progress_{}", did);
-        
+
         let progress_json = match LocalStorage::get::<String>(&storage_key) {
             Ok(json) => json,
             Err(_) => return Ok(None),
         };
 
-        let progress: MigrationProgress = serde_json::from_str(&progress_json)
-            .map_err(|e| ClientError::SerializationError {
+        let progress: MigrationProgress =
+            serde_json::from_str(&progress_json).map_err(|e| ClientError::SerializationError {
                 message: format!("Failed to deserialize migration progress: {}", e),
             })?;
 
@@ -195,7 +192,7 @@ impl JwtUtils {
 
         // Decode the payload (second part)
         let payload_b64 = parts[1];
-        
+
         // Add padding if needed
         let padded = match payload_b64.len() % 4 {
             2 => format!("{}==", payload_b64),
@@ -205,9 +202,11 @@ impl JwtUtils {
 
         // Decode base64
         use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD.decode(&padded).ok()?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&padded)
+            .ok()?;
         let payload_str = String::from_utf8(decoded).ok()?;
-        
+
         // Parse JSON to get exp claim
         let payload: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
         payload.get("exp")?.as_u64()
@@ -281,7 +280,7 @@ impl MigrationSessionManager {
     pub fn can_continue_migration(&self) -> Result<bool, ClientError> {
         let old_session = self.get_old_session()?;
         let new_session = self.get_new_session()?;
-        
+
         Ok(old_session.is_some() && new_session.is_some())
     }
 }
@@ -329,13 +328,13 @@ mod tests {
     fn test_jwt_utilities() {
         // Test JWT with expiration in far future
         let jwt = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0IiwiaWF0IjoxNjIzOTc2NDAwLCJleHAiOjk5OTk5OTk5OTl9.test";
-        
+
         assert!(!JwtUtils::is_expired(jwt));
         assert!(!JwtUtils::needs_refresh(jwt));
 
         // Test JWT with expiration in past
         let expired_jwt = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0IiwiaWF0IjoxNjIzOTc2NDAwLCJleHAiOjE2MjM5NzY0MDB9.test";
-        
+
         assert!(JwtUtils::is_expired(expired_jwt));
         assert!(JwtUtils::needs_refresh(expired_jwt));
     }

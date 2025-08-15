@@ -1,5 +1,5 @@
 //! Tests for cursor pagination edge cases
-//! 
+//!
 //! These tests verify that cursor handling matches the Go goat implementation
 //! for various edge cases including empty cursors, null cursors, and continuation.
 
@@ -15,7 +15,10 @@ mod tests {
         let json_no_cursor = json!({
             "blobs": []
         });
-        let cursor = json_no_cursor.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
+        let cursor = json_no_cursor
+            .get("cursor")
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string());
         assert_eq!(cursor, None);
 
         // Test case 2: Null cursor
@@ -23,7 +26,10 @@ mod tests {
             "blobs": [],
             "cursor": null
         });
-        let cursor = json_null_cursor.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
+        let cursor = json_null_cursor
+            .get("cursor")
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string());
         assert_eq!(cursor, None);
 
         // Test case 3: Empty cursor
@@ -31,7 +37,10 @@ mod tests {
             "blobs": [],
             "cursor": ""
         });
-        let cursor = json_empty_cursor.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
+        let cursor = json_empty_cursor
+            .get("cursor")
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string());
         assert_eq!(cursor, Some("".to_string()));
 
         // Test case 4: Valid cursor
@@ -39,7 +48,10 @@ mod tests {
             "blobs": [],
             "cursor": "next_page_token_123"
         });
-        let cursor = json_valid_cursor.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
+        let cursor = json_valid_cursor
+            .get("cursor")
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string());
         assert_eq!(cursor, Some("next_page_token_123".to_string()));
     }
 
@@ -80,8 +92,8 @@ mod tests {
         // Simulate the pagination loop logic
         let test_cases = vec![
             // (input_cursor, output_cursor, should_break)
-            (None, None, true),                    // No cursor -> stop
-            (Some("".to_string()), None, true),   // Empty cursor -> stop  
+            (None, None, true),                 // No cursor -> stop
+            (Some("".to_string()), None, true), // Empty cursor -> stop
             (Some("page2".to_string()), Some("page2".to_string()), false), // Valid cursor -> continue
         ];
 
@@ -113,7 +125,7 @@ mod tests {
         let test_cursors = vec![
             "simple_cursor",
             "cursor-with-dashes",
-            "cursor.with.dots", 
+            "cursor.with.dots",
             "cursor_with_underscores",
             "cursor123with456numbers",
             "CURSOR_WITH_CAPS",
@@ -124,14 +136,14 @@ mod tests {
                 "blobs": [],
                 "cursor": cursor_value
             });
-            
+
             let parsed_cursor = json_with_cursor
                 .get("cursor")
                 .and_then(|c| c.as_str())
                 .map(|s| s.to_string());
-            
+
             assert_eq!(parsed_cursor, Some(cursor_value.to_string()));
-            
+
             // Verify continuation logic works
             let should_continue = if let Some(next_cursor) = parsed_cursor {
                 !next_cursor.is_empty()

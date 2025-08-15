@@ -2,11 +2,13 @@ use anyhow::Result;
 use reqwest::Client;
 use serde_json::json;
 use tracing::{error, info, instrument};
+// Import console macros from our crate
+use crate::{console_debug};
 
+use super::errors::ClientError;
 use super::identity_resolver::WebIdentityResolver;
 use super::session::JwtUtils;
 use super::types::*;
-use super::errors::ClientError;
 
 /// Client for ATProto PDS operations
 pub struct PdsClient {
@@ -19,21 +21,10 @@ impl PdsClient {
     pub fn new() -> Self {
         Self {
             http_client: {
-                #[cfg(target_arch = "wasm32")]
-                {
                     Client::builder()
                         .user_agent("atproto-migration-service/1.0")
                         .build()
                         .expect("Failed to create HTTP client")
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    Client::builder()
-                        .timeout(std::time::Duration::from_secs(30))
-                        .user_agent("atproto-migration-service/1.0")
-                        .build()
-                        .expect("Failed to create HTTP client")
-                }
             },
             identity_resolver: WebIdentityResolver::new(),
         }
@@ -43,9 +34,13 @@ impl PdsClient {
     // NEWBOLD.md Step: goat account login --pds-host $NEWPDSHOST -u $ACCOUNTDID -p $NEWPASSWORD (line 52)
     // Implements: Creates session on PDS for specified account identifier
     #[instrument(skip(self, password), err)]
-    pub async fn login(&self, identifier: &str, password: &str) -> Result<ClientLoginResponse, ClientError> {
+    pub async fn login(
+        &self,
+        identifier: &str,
+        password: &str,
+    ) -> Result<ClientLoginResponse, ClientError> {
         info!("Starting login for identifier: {}", identifier);
-        
+
         // First resolve identifier to DID if it's a handle
         let (did, pds_url) = if identifier.starts_with("did:") {
             // If it's already a DID, we need to resolve the DID document to find PDS
@@ -54,17 +49,18 @@ impl PdsClient {
             (did, pds_url)
         } else {
             // If it's a handle, resolve to DID first
-            let resolved_did = self.identity_resolver
+            let resolved_did = self
+                .identity_resolver
                 .resolve_handle(identifier)
                 .await
                 .map_err(ClientError::ResolutionFailed)?;
-            
+
             let pds_url = self.resolve_pds_from_did(&resolved_did).await?;
             (resolved_did, pds_url)
         };
-        
+
         // Call ATProto createSession
-        // NEWBOLD.md: com.atproto.server.createSession for authentication 
+        // NEWBOLD.md: com.atproto.server.createSession for authentication
         let session_url = format!("{}/xrpc/com.atproto.server.createSession", pds_url);
         let request_body = json!({
             "identifier": identifier,
@@ -73,7 +69,8 @@ impl PdsClient {
 
         info!("Calling createSession at: {}", session_url);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&session_url)
             .header("Content-Type", "application/json")
             .json(&request_body)
@@ -84,13 +81,19 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let session_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse response: {}", e),
-                })?;
-            
+            let session_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse response: {}", e),
+                    })?;
+
             // Parse JWT to get expiration
-            let access_jwt = session_data["accessJwt"].as_str().unwrap_or_default().to_string();
+            let access_jwt = session_data["accessJwt"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             let expires_at = if !access_jwt.is_empty() {
                 JwtUtils::get_expiration(&access_jwt)
             } else {
@@ -99,10 +102,16 @@ impl PdsClient {
 
             let session = ClientSessionCredentials {
                 did: session_data["did"].as_str().unwrap_or(&did).to_string(),
-                handle: session_data["handle"].as_str().unwrap_or(identifier).to_string(),
+                handle: session_data["handle"]
+                    .as_str()
+                    .unwrap_or(identifier)
+                    .to_string(),
                 pds: pds_url,
                 access_jwt,
-                refresh_jwt: session_data["refreshJwt"].as_str().unwrap_or_default().to_string(),
+                refresh_jwt: session_data["refreshJwt"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 expires_at,
             };
 
@@ -115,11 +124,13 @@ impl PdsClient {
             })
         } else {
             let status = response.status();
-            let error_text = response.text().await
+            let error_text = response
+                .text()
+                .await
                 .map_err(|e| ClientError::NetworkError {
                     message: format!("Failed to read error response: {}", e),
                 })?;
-            
+
             error!("Login failed with status {}: {}", status, error_text);
             Ok(ClientLoginResponse {
                 success: false,
@@ -132,16 +143,25 @@ impl PdsClient {
 
     /// Try to login with new PDS credentials to check if account already exists
     #[instrument(skip(self, password), err)]
-    pub async fn try_login_before_creation(&self, handle: &str, password: &str, pds_url: &str) -> Result<ClientLoginResponse, ClientError> {
-        info!("Trying login before account creation for handle: {}", handle);
-        
+    pub async fn try_login_before_creation(
+        &self,
+        handle: &str,
+        password: &str,
+        pds_url: &str,
+    ) -> Result<ClientLoginResponse, ClientError> {
+        info!(
+            "Trying login before account creation for handle: {}",
+            handle
+        );
+
         let session_url = format!("{}/xrpc/com.atproto.server.createSession", pds_url);
         let request_body = serde_json::json!({
             "identifier": handle,
             "password": password
         });
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&session_url)
             .header("Content-Type", "application/json")
             .json(&request_body)
@@ -152,13 +172,19 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let session_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse response: {}", e),
-                })?;
-            
+            let session_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse response: {}", e),
+                    })?;
+
             // Parse JWT to get expiration
-            let access_jwt = session_data["accessJwt"].as_str().unwrap_or_default().to_string();
+            let access_jwt = session_data["accessJwt"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             let expires_at = if !access_jwt.is_empty() {
                 JwtUtils::get_expiration(&access_jwt)
             } else {
@@ -167,14 +193,23 @@ impl PdsClient {
 
             let session = ClientSessionCredentials {
                 did: session_data["did"].as_str().unwrap_or_default().to_string(),
-                handle: session_data["handle"].as_str().unwrap_or(handle).to_string(),
+                handle: session_data["handle"]
+                    .as_str()
+                    .unwrap_or(handle)
+                    .to_string(),
                 pds: pds_url.to_string(),
                 access_jwt,
-                refresh_jwt: session_data["refreshJwt"].as_str().unwrap_or_default().to_string(),
+                refresh_jwt: session_data["refreshJwt"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 expires_at,
             };
 
-            info!("Login successful - account already exists for handle: {}", handle);
+            info!(
+                "Login successful - account already exists for handle: {}",
+                handle
+            );
             Ok(ClientLoginResponse {
                 success: true,
                 message: "Account already exists - login successful".to_string(),
@@ -182,7 +217,10 @@ impl PdsClient {
                 session: Some(session),
             })
         } else {
-            info!("Login failed - account does not exist for handle: {}", handle);
+            info!(
+                "Login failed - account does not exist for handle: {}",
+                handle
+            );
             Ok(ClientLoginResponse {
                 success: false,
                 message: "Account does not exist".to_string(),
@@ -196,12 +234,15 @@ impl PdsClient {
     // NEWBOLD.md Step: goat account create --pds-host $NEWPDSHOST --existing-did $ACCOUNTDID --handle $NEWHANDLE --password $NEWPASSWORD --email $NEWEMAIL --invite-code $INVITECODE --service-auth $SERVICEAUTH (line 40-47)
     // Implements: Creates account on new PDS with existing DID using service auth token
     #[instrument(skip(self), err)]
-    pub async fn create_account(&self, request: ClientCreateAccountRequest) -> Result<ClientCreateAccountResponse, ClientError> {
+    pub async fn create_account(
+        &self,
+        request: ClientCreateAccountRequest,
+    ) -> Result<ClientCreateAccountResponse, ClientError> {
         info!("Creating account for handle: {}", request.handle);
-        
+
         // Derive PDS URL from handle domain (simplified approach)
         let pds_url = self.derive_pds_url_from_handle(&request.handle);
-        
+
         // NEWBOLD.md: com.atproto.server.createAccount for account creation with existing DID
         let create_url = format!("{}/xrpc/com.atproto.server.createAccount", pds_url);
         let mut request_body = json!({
@@ -215,14 +256,16 @@ impl PdsClient {
             request_body["inviteCode"] = json!(invite_code);
         }
 
-        let mut request_builder = self.http_client
+        let mut request_builder = self
+            .http_client
             .post(&create_url)
             .header("Content-Type", "application/json")
             .json(&request_body);
 
         // Add authorization header if service auth token is provided (for existing DID accounts)
         if let Some(service_auth_token) = &request.service_auth_token {
-            request_builder = request_builder.header("Authorization", format!("Bearer {}", service_auth_token));
+            request_builder =
+                request_builder.header("Authorization", format!("Bearer {}", service_auth_token));
         }
 
         let response = request_builder
@@ -233,13 +276,19 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let account_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse response: {}", e),
-                })?;
-            
+            let account_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse response: {}", e),
+                    })?;
+
             // Parse JWT to get expiration
-            let access_jwt = account_data["accessJwt"].as_str().unwrap_or_default().to_string();
+            let access_jwt = account_data["accessJwt"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             let expires_at = if !access_jwt.is_empty() {
                 JwtUtils::get_expiration(&access_jwt)
             } else {
@@ -247,11 +296,20 @@ impl PdsClient {
             };
 
             let session = ClientSessionCredentials {
-                did: account_data["did"].as_str().unwrap_or(&request.did).to_string(),
-                handle: account_data["handle"].as_str().unwrap_or(&request.handle).to_string(),
+                did: account_data["did"]
+                    .as_str()
+                    .unwrap_or(&request.did)
+                    .to_string(),
+                handle: account_data["handle"]
+                    .as_str()
+                    .unwrap_or(&request.handle)
+                    .to_string(),
                 pds: pds_url,
                 access_jwt,
-                refresh_jwt: account_data["refreshJwt"].as_str().unwrap_or_default().to_string(),
+                refresh_jwt: account_data["refreshJwt"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
                 expires_at,
             };
 
@@ -265,67 +323,84 @@ impl PdsClient {
             })
         } else {
             let status = response.status();
-            let error_text = response.text().await
+            let error_text = response
+                .text()
+                .await
                 .map_err(|e| ClientError::NetworkError {
                     message: format!("Failed to read error response: {}", e),
                 })?;
-            
+
             // Try to parse structured JSON error response
-            let (error_code, resumable, session) = if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
-                let error_code = error_json.get("error")
-                    .and_then(|e| e.as_str())
-                    .map(|s| s.to_string());
-                
-                // Check if this is a resumable error (AlreadyExists)
-                let resumable = error_code.as_ref()
-                    .map(|code| code == "AlreadyExists")
-                    .unwrap_or(false);
-                
-                // For AlreadyExists during migration, check if session credentials are provided
-                let session = if resumable && request.service_auth_token.is_some() {
-                    // Some servers may include session credentials in AlreadyExists responses during migration
-                    if let (Some(access_jwt), Some(refresh_jwt)) = (
-                        error_json.get("accessJwt").and_then(|j| j.as_str()),
-                        error_json.get("refreshJwt").and_then(|j| j.as_str())
-                    ) {
-                        let expires_at = if !access_jwt.is_empty() {
-                            JwtUtils::get_expiration(access_jwt)
+            let (error_code, resumable, session) =
+                if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
+                    let error_code = error_json
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .map(|s| s.to_string());
+
+                    // Check if this is a resumable error (AlreadyExists)
+                    let resumable = error_code
+                        .as_ref()
+                        .map(|code| code == "AlreadyExists")
+                        .unwrap_or(false);
+
+                    // For AlreadyExists during migration, check if session credentials are provided
+                    let session = if resumable && request.service_auth_token.is_some() {
+                        // Some servers may include session credentials in AlreadyExists responses during migration
+                        if let (Some(access_jwt), Some(refresh_jwt)) = (
+                            error_json.get("accessJwt").and_then(|j| j.as_str()),
+                            error_json.get("refreshJwt").and_then(|j| j.as_str()),
+                        ) {
+                            let expires_at = if !access_jwt.is_empty() {
+                                JwtUtils::get_expiration(access_jwt)
+                            } else {
+                                None
+                            };
+
+                            Some(ClientSessionCredentials {
+                                did: error_json
+                                    .get("did")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or(&request.did)
+                                    .to_string(),
+                                handle: error_json
+                                    .get("handle")
+                                    .and_then(|h| h.as_str())
+                                    .unwrap_or(&request.handle)
+                                    .to_string(),
+                                pds: pds_url.clone(),
+                                access_jwt: access_jwt.to_string(),
+                                refresh_jwt: refresh_jwt.to_string(),
+                                expires_at,
+                            })
                         } else {
                             None
-                        };
-
-                        Some(ClientSessionCredentials {
-                            did: error_json.get("did").and_then(|d| d.as_str()).unwrap_or(&request.did).to_string(),
-                            handle: error_json.get("handle").and_then(|h| h.as_str()).unwrap_or(&request.handle).to_string(),
-                            pds: pds_url.clone(),
-                            access_jwt: access_jwt.to_string(),
-                            refresh_jwt: refresh_jwt.to_string(),
-                            expires_at,
-                        })
+                        }
                     } else {
                         None
-                    }
+                    };
+
+                    (error_code, resumable, session)
                 } else {
-                    None
+                    (None, false, None)
                 };
-                
-                (error_code, resumable, session)
-            } else {
-                (None, false, None)
-            };
-            
+
             if session.is_some() {
                 // Special case: AlreadyExists with session credentials provided (successful resumption)
                 info!("Account already exists, but session credentials provided for resumption");
                 Ok(ClientCreateAccountResponse {
                     success: true, // Mark as success since we got session credentials
-                    message: "Account already exists - resuming with provided credentials".to_string(),
+                    message: "Account already exists - resuming with provided credentials"
+                        .to_string(),
                     session,
                     error_code,
                     resumable,
                 })
             } else {
-                error!("Account creation failed with status {}: {}", status, error_text);
+                error!(
+                    "Account creation failed with status {}: {}",
+                    status, error_text
+                );
                 Ok(ClientCreateAccountResponse {
                     success: false,
                     message: format!("Account creation failed: {}", error_text),
@@ -341,11 +416,15 @@ impl PdsClient {
     // NEWBOLD.md Step: goat account status (line 58)
     // Implements: Checks migration progress including blobs, records, and validation status
     #[instrument(skip(self), err)]
-    pub async fn check_account_status(&self, session: &ClientSessionCredentials) -> Result<ClientAccountStatusResponse, ClientError> {
+    pub async fn check_account_status(
+        &self,
+        session: &ClientSessionCredentials,
+    ) -> Result<ClientAccountStatusResponse, ClientError> {
         // NEWBOLD.md: com.atproto.server.checkAccountStatus for migration progress tracking
         let status_url = format!("{}/xrpc/com.atproto.server.checkAccountStatus", session.pds);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&status_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -355,10 +434,13 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let status_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse status response: {}", e),
-                })?;
+            let status_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse status response: {}", e),
+                    })?;
 
             let activated = status_data["activated"].as_bool();
             let expected_blobs = status_data["expectedBlobs"].as_i64();
@@ -384,7 +466,9 @@ impl PdsClient {
                 valid_did,
             })
         } else {
-            let error_text = response.text().await
+            let error_text = response
+                .text()
+                .await
                 .map_err(|e| ClientError::NetworkError {
                     message: format!("Failed to read error response: {}", e),
                 })?;
@@ -407,10 +491,14 @@ impl PdsClient {
 
     /// Refresh session tokens
     #[instrument(skip(self), err)]
-    pub async fn refresh_session(&self, session: &ClientSessionCredentials) -> Result<ClientSessionCredentials, ClientError> {
+    pub async fn refresh_session(
+        &self,
+        session: &ClientSessionCredentials,
+    ) -> Result<ClientSessionCredentials, ClientError> {
         let refresh_url = format!("{}/xrpc/com.atproto.server.refreshSession", session.pds);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&refresh_url)
             .header("Authorization", format!("Bearer {}", session.refresh_jwt))
             .send()
@@ -420,12 +508,18 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let refresh_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse refresh response: {}", e),
-                })?;
+            let refresh_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse refresh response: {}", e),
+                    })?;
 
-            let new_access_jwt = refresh_data["accessJwt"].as_str().unwrap_or_default().to_string();
+            let new_access_jwt = refresh_data["accessJwt"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             let expires_at = if !new_access_jwt.is_empty() {
                 JwtUtils::get_expiration(&new_access_jwt)
             } else {
@@ -434,10 +528,16 @@ impl PdsClient {
 
             let mut updated_session = session.clone();
             updated_session.access_jwt = new_access_jwt;
-            updated_session.refresh_jwt = refresh_data["refreshJwt"].as_str().unwrap_or(&session.refresh_jwt).to_string();
+            updated_session.refresh_jwt = refresh_data["refreshJwt"]
+                .as_str()
+                .unwrap_or(&session.refresh_jwt)
+                .to_string();
             updated_session.expires_at = expires_at;
 
-            info!("Session refreshed successfully for DID: {}", updated_session.did);
+            info!(
+                "Session refreshed successfully for DID: {}",
+                updated_session.did
+            );
             Ok(updated_session)
         } else {
             let error_text = response.text().await.unwrap_or_default();
@@ -449,11 +549,15 @@ impl PdsClient {
     /// Resolve PDS URL from DID by resolving the DID document
     async fn resolve_pds_from_did(&self, did: &str) -> Result<String, ClientError> {
         info!("Resolving PDS URL from DID: {}", did);
-        
+
         // Handle different DID methods
         if did.starts_with("did:plc:") || did.starts_with("did:web:") {
             // Use the identity resolver to get the PDS endpoint from the DID document
-            match self.identity_resolver.resolve_did_to_pds_endpoint(did).await {
+            match self
+                .identity_resolver
+                .resolve_did_to_pds_endpoint(did)
+                .await
+            {
                 Ok(pds_url) => {
                     info!("Resolved DID {} to PDS: {}", did, pds_url);
                     Ok(pds_url)
@@ -478,7 +582,7 @@ impl PdsClient {
     pub fn derive_pds_url_from_handle(&self, handle: &str) -> String {
         let parts: Vec<&str> = handle.split('.').collect();
         if parts.len() >= 2 {
-            let domain = format!("{}.{}", parts[parts.len()-2], parts[parts.len()-1]);
+            let domain = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
             match domain.as_str() {
                 "bsky.social" => "https://bsky.social".to_string(),
                 "blacksky.app" => "https://blacksky.app".to_string(),
@@ -494,7 +598,8 @@ impl PdsClient {
     pub async fn describe_server(&self, pds_url: &str) -> Result<serde_json::Value, ClientError> {
         let describe_url = format!("{}/xrpc/com.atproto.server.describeServer", pds_url);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&describe_url)
             .send()
             .await
@@ -503,7 +608,9 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let server_info = response.json().await
+            let server_info = response
+                .json()
+                .await
                 .map_err(|e| ClientError::NetworkError {
                     message: format!("Failed to parse server description: {}", e),
                 })?;
@@ -522,13 +629,20 @@ impl PdsClient {
     // NEWBOLD.md Step: goat repo export $ACCOUNTDID (line 76)
     // Implements: Exports repository as CAR file for migration
     #[instrument(skip(self), err)]
-    pub async fn export_repository(&self, session: &ClientSessionCredentials) -> Result<ClientRepoExportResponse, ClientError> {
+    pub async fn export_repository(
+        &self,
+        session: &ClientSessionCredentials,
+    ) -> Result<ClientRepoExportResponse, ClientError> {
         info!("Exporting repository for DID: {}", session.did);
 
         // NEWBOLD.md: com.atproto.sync.getRepo for repository export
-        let export_url = format!("{}/xrpc/com.atproto.sync.getRepo?did={}", session.pds, session.did);
+        let export_url = format!(
+            "{}/xrpc/com.atproto.sync.getRepo?did={}",
+            session.pds, session.did
+        );
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&export_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -538,7 +652,9 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let car_bytes = response.bytes().await
+            let car_bytes = response
+                .bytes()
+                .await
                 .map_err(|e| ClientError::NetworkError {
                     message: format!("Failed to read CAR data: {}", e),
                 })?;
@@ -546,7 +662,10 @@ impl PdsClient {
             let car_data = car_bytes.to_vec();
             let car_size = car_data.len() as u64;
 
-            info!("Repository exported successfully, size: {} bytes", car_size.to_string());
+            info!(
+                "Repository exported successfully, size: {} bytes",
+                car_size.to_string()
+            );
 
             Ok(ClientRepoExportResponse {
                 success: true,
@@ -571,13 +690,22 @@ impl PdsClient {
     // NEWBOLD.md Step: goat repo import ./did:plc:do2ar6uqzrvyzq3wevji6fbe.20250625142552.car (line 81)
     // Implements: Imports repository CAR file to new PDS
     #[instrument(skip(self), err)]
-    pub async fn import_repository(&self, session: &ClientSessionCredentials, car_data: Vec<u8>) -> Result<ClientRepoImportResponse, ClientError> {
-        info!("Importing repository for DID: {}, CAR size: {} bytes", session.did, car_data.len());
+    pub async fn import_repository(
+        &self,
+        session: &ClientSessionCredentials,
+        car_data: Vec<u8>,
+    ) -> Result<ClientRepoImportResponse, ClientError> {
+        info!(
+            "Importing repository for DID: {}, CAR size: {} bytes",
+            session.did,
+            car_data.len()
+        );
 
         // NEWBOLD.md: com.atproto.repo.importRepo for CAR file import
         let import_url = format!("{}/xrpc/com.atproto.repo.importRepo", session.pds);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&import_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .header("Content-Type", "application/vnd.ipld.car")
@@ -610,26 +738,33 @@ impl PdsClient {
     // NEWBOLD.md Step: goat account missing-blobs (line 86)
     // Implements: Lists missing blobs that need migration to new PDS
     #[instrument(skip(self), err)]
-    pub async fn get_missing_blobs(&self, session: &ClientSessionCredentials, cursor: Option<String>, limit: Option<i64>) -> Result<ClientMissingBlobsResponse, ClientError> {
+    pub async fn get_missing_blobs(
+        &self,
+        session: &ClientSessionCredentials,
+        cursor: Option<String>,
+        limit: Option<i64>,
+    ) -> Result<ClientMissingBlobsResponse, ClientError> {
         info!("Getting missing blobs for DID: {}", session.did);
 
         // NEWBOLD.md: com.atproto.repo.listMissingBlobs for migration-specific blob enumeration
-        let mut missing_blobs_url = format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
+        let mut missing_blobs_url =
+            format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
         let mut query_params = Vec::new();
-        
+
         if let Some(cursor) = cursor {
             query_params.push(format!("cursor={}", cursor));
         }
         if let Some(limit) = limit {
             query_params.push(format!("limit={}", limit));
         }
-        
+
         if !query_params.is_empty() {
             missing_blobs_url.push('?');
             missing_blobs_url.push_str(&query_params.join("&"));
         }
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&missing_blobs_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -639,23 +774,31 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let blobs_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse missing blobs response: {}", e),
-                })?;
+            let blobs_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse missing blobs response: {}", e),
+                    })?;
 
             // Parse the blobs from the response using proper deserialization
-            let missing_blobs = if let Some(blobs_array) = blobs_data.get("blobs").and_then(|b| b.as_array()) {
-                blobs_array.iter()
-                    .filter_map(|blob| {
-                        serde_json::from_value::<ClientMissingBlob>(blob.clone()).ok()
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
+            let missing_blobs =
+                if let Some(blobs_array) = blobs_data.get("blobs").and_then(|b| b.as_array()) {
+                    blobs_array
+                        .iter()
+                        .filter_map(|blob| {
+                            serde_json::from_value::<ClientMissingBlob>(blob.clone()).ok()
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
 
-            let cursor = blobs_data.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
+            let cursor = blobs_data
+                .get("cursor")
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string());
 
             info!("Found {} missing blobs", missing_blobs.len().to_string());
 
@@ -696,10 +839,10 @@ impl PdsClient {
         // NEWBOLD.md: com.atproto.sync.listBlobs for Go goat compatible full blob enumeration
         let mut list_blobs_url = format!("{}/xrpc/com.atproto.sync.listBlobs", session.pds);
         let mut query_params = Vec::new();
-        
+
         // Required parameter
         query_params.push(format!("did={}", did));
-        
+
         // Optional parameters
         if let Some(cursor) = cursor {
             query_params.push(format!("cursor={}", cursor));
@@ -710,11 +853,12 @@ impl PdsClient {
         if let Some(since) = since {
             query_params.push(format!("since={}", since));
         }
-        
+
         list_blobs_url.push('?');
         list_blobs_url.push_str(&query_params.join("&"));
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&list_blobs_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -724,21 +868,28 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let blobs_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse list blobs response: {}", e),
-                })?;
+            let blobs_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse list blobs response: {}", e),
+                    })?;
 
             // Parse the CIDs array from the response (matches Go []string structure)
             let cids = if let Some(cids_array) = blobs_data.get("cids").and_then(|c| c.as_array()) {
-                cids_array.iter()
+                cids_array
+                    .iter()
                     .filter_map(|cid| cid.as_str().map(|s| s.to_string()))
                     .collect()
             } else {
                 Vec::new()
             };
 
-            let cursor = blobs_data.get("cursor").and_then(|c| c.as_str()).map(|s| s.to_string());
+            let cursor = blobs_data
+                .get("cursor")
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string());
 
             info!("Found {} blobs in repository", cids.len());
 
@@ -761,17 +912,211 @@ impl PdsClient {
         }
     }
 
+    /// List ALL blobs from source PDS with automatic pagination (Go goat runBlobExport compatible)
+    /// This method provides complete blob enumeration like the Go SyncListBlobs with pagination
+    // NEWBOLD.md Compatible: Full blob enumeration with pagination like Go goat blob export
+    // Implements: Complete source blob inventory using com.atproto.sync.listBlobs with auto-pagination
+    #[instrument(skip(self), err)]
+    pub async fn list_all_source_blobs(
+        &self,
+        session: &ClientSessionCredentials,
+        did: &str,
+    ) -> Result<Vec<String>, ClientError> {
+        info!("Listing ALL blobs for DID: {} (complete enumeration)", did);
+
+        let mut all_cids = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        // Paginate through all blobs, matching Go goat runBlobExport pattern
+        loop {
+            console_debug!(
+                "[PdsClient] Fetching blob list batch with cursor: {:?}",
+                cursor.as_ref().unwrap_or(&"<none>".to_string())
+            );
+
+            match self.sync_list_blobs(session, did, cursor.clone(), Some(500), None).await {
+                Ok(response) => {
+                    if response.success {
+                        if let Some(mut batch_cids) = response.cids {
+                            console_debug!(
+                                "[PdsClient] Received {} CIDs in this batch",
+                                batch_cids.len()
+                            );
+                            all_cids.append(&mut batch_cids);
+
+                            // Check for pagination continuation - matches Go goat pattern:
+                            // if resp.Cursor != nil && *resp.Cursor != ""
+                            cursor = if let Some(next_cursor) = response.cursor {
+                                if !next_cursor.is_empty() {
+                                    Some(next_cursor) // Continue with next cursor
+                                } else {
+                                    break; // Empty cursor means no more pages
+                                }
+                            } else {
+                                break; // No cursor means no more pages
+                            };
+                        } else {
+                            break; // No CIDs returned
+                        }
+                    } else {
+                        return Err(ClientError::ApiError {
+                            message: format!("Failed to list source blobs: {}", response.message),
+                        });
+                    }
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+
+        info!(
+            "Completed source blob enumeration: {} total blobs found",
+            all_cids.len()
+        );
+
+        Ok(all_cids)
+    }
+
+    /// List ALL blobs from target PDS with automatic pagination (for reconciliation)
+    /// This method provides complete blob enumeration for the target PDS to compare with source
+    // Implements: Complete target blob inventory using com.atproto.sync.listBlobs with auto-pagination
+    #[instrument(skip(self), err)]
+    pub async fn list_all_target_blobs(
+        &self,
+        session: &ClientSessionCredentials,
+        did: &str,
+    ) -> Result<Vec<String>, ClientError> {
+        info!("Listing ALL target blobs for DID: {} (complete enumeration)", did);
+
+        let mut all_cids = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        // Paginate through all blobs, using the same pattern as source enumeration
+        loop {
+            console_debug!(
+                "[PdsClient] Fetching target blob list batch with cursor: {:?}",
+                cursor.as_ref().unwrap_or(&"<none>".to_string())
+            );
+
+            match self.sync_list_blobs(session, did, cursor.clone(), Some(500), None).await {
+                Ok(response) => {
+                    if response.success {
+                        if let Some(mut batch_cids) = response.cids {
+                            console_debug!(
+                                "[PdsClient] Received {} target CIDs in this batch",
+                                batch_cids.len()
+                            );
+                            all_cids.append(&mut batch_cids);
+
+                            // Check for pagination continuation - matches Go goat pattern:
+                            // if resp.Cursor != nil && *resp.Cursor != ""
+                            cursor = if let Some(next_cursor) = response.cursor {
+                                if !next_cursor.is_empty() {
+                                    Some(next_cursor) // Continue with next cursor
+                                } else {
+                                    break; // Empty cursor means no more pages
+                                }
+                            } else {
+                                break; // No cursor means no more pages
+                            };
+                        } else {
+                            break; // No CIDs returned
+                        }
+                    } else {
+                        return Err(ClientError::ApiError {
+                            message: format!("Failed to list target blobs: {}", response.message),
+                        });
+                    }
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+
+        info!(
+            "Completed target blob enumeration: {} total blobs found",
+            all_cids.len()
+        );
+
+        Ok(all_cids)
+    }
+
+    /// Verify that specific blobs exist on the target PDS using direct getBlob calls
+    /// This is more reliable than enumeration for recently uploaded blobs due to eventual consistency
+    pub async fn verify_blobs_exist(
+        &self,
+        session: &ClientSessionCredentials,
+        cids: &[String],
+    ) -> Result<Vec<String>, ClientError> {
+        info!(
+            "Verifying {} blobs exist on target PDS using direct getBlob calls",
+            cids.len()
+        );
+
+        let mut existing_blobs = Vec::new();
+        
+        for cid in cids {
+            console_debug!("[PdsClient] Verifying blob exists: {}", cid);
+            
+            // Use sync.getBlob to directly check if blob exists
+            let url = format!("{}/xrpc/com.atproto.sync.getBlob", &session.pds);
+            
+            let response = self
+                .http_client
+                .get(&url)
+                .bearer_auth(&session.access_jwt)
+                .query(&[("did", &session.did), ("cid", cid)])
+                .send()
+                .await
+                .map_err(|e| ClientError::NetworkError {
+                    message: format!("Failed to verify blob {}: {}", cid, e),
+                })?;
+
+            if response.status().is_success() {
+                console_debug!("[PdsClient] ✅ Blob {} verified as existing", cid);
+                existing_blobs.push(cid.clone());
+            } else {
+                console_debug!(
+                    "{}",
+                    format!(
+                        "[PdsClient] ❌ Blob {} not found (status: {})",
+                        cid,
+                        response.status()
+                    )
+                );
+            }
+        }
+
+        info!(
+            "Blob verification complete: {}/{} blobs confirmed existing",
+            existing_blobs.len(),
+            cids.len()
+        );
+
+        Ok(existing_blobs)
+    }
+
     /// Export/download a blob from PDS
     // NEWBOLD.md Step: goat blob export $ACCOUNTDID (line 98) - individual blob download
     // Implements: Downloads individual blob using com.atproto.sync.getBlob
     #[instrument(skip(self), err)]
-    pub async fn export_blob(&self, session: &ClientSessionCredentials, cid: String) -> Result<ClientBlobExportResponse, ClientError> {
+    pub async fn export_blob(
+        &self,
+        session: &ClientSessionCredentials,
+        cid: String,
+    ) -> Result<ClientBlobExportResponse, ClientError> {
         info!("Exporting blob {} from DID: {}", cid, session.did);
 
         // NEWBOLD.md: com.atproto.sync.getBlob for individual blob retrieval
-        let export_url = format!("{}/xrpc/com.atproto.sync.getBlob?did={}&cid={}", session.pds, session.did, cid);
+        let export_url = format!(
+            "{}/xrpc/com.atproto.sync.getBlob?did={}&cid={}",
+            session.pds, session.did, cid
+        );
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&export_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -781,13 +1126,19 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let blob_bytes = response.bytes().await
+            let blob_bytes = response
+                .bytes()
+                .await
                 .map_err(|e| ClientError::NetworkError {
                     message: format!("Failed to read blob data: {}", e),
                 })?;
 
             let blob_data = blob_bytes.to_vec();
-            info!("Blob {} exported successfully, size: {} bytes", cid, blob_data.len().to_string());
+            info!(
+                "Blob {} exported successfully, size: {} bytes",
+                cid,
+                blob_data.len().to_string()
+            );
 
             Ok(ClientBlobExportResponse {
                 success: true,
@@ -810,13 +1161,24 @@ impl PdsClient {
     // NEWBOLD.md Step: goat blob upload {} (line 104) - individual blob upload
     // Implements: Uploads individual blob using com.atproto.repo.uploadBlob
     #[instrument(skip(self), err)]
-    pub async fn upload_blob(&self, session: &ClientSessionCredentials, cid: String, blob_data: Vec<u8>) -> Result<ClientBlobUploadResponse, ClientError> {
-        info!("Uploading blob {} to DID: {}, size: {} bytes", cid, session.did, blob_data.len());
+    pub async fn upload_blob(
+        &self,
+        session: &ClientSessionCredentials,
+        cid: String,
+        blob_data: Vec<u8>,
+    ) -> Result<ClientBlobUploadResponse, ClientError> {
+        info!(
+            "Uploading blob {} to DID: {}, size: {} bytes",
+            cid,
+            session.did,
+            blob_data.len()
+        );
 
         // NEWBOLD.md: com.atproto.repo.uploadBlob for individual blob upload
         let upload_url = format!("{}/xrpc/com.atproto.repo.uploadBlob", session.pds);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&upload_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .header("Content-Type", "application/octet-stream")
@@ -849,13 +1211,17 @@ impl PdsClient {
     // NEWBOLD.md Step: goat bsky prefs export > prefs.json (line 115)
     // Implements: Exports Bluesky preferences for migration
     #[instrument(skip(self), err)]
-    pub async fn export_preferences(&self, session: &ClientSessionCredentials) -> Result<ClientPreferencesExportResponse, ClientError> {
+    pub async fn export_preferences(
+        &self,
+        session: &ClientSessionCredentials,
+    ) -> Result<ClientPreferencesExportResponse, ClientError> {
         info!("Exporting preferences for DID: {}", session.did);
 
         // NEWBOLD.md: app.bsky.actor.getPreferences for preferences export
         let preferences_url = format!("{}/xrpc/app.bsky.actor.getPreferences", session.pds);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&preferences_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -865,10 +1231,13 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let preferences_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse preferences response: {}", e),
-                })?;
+            let preferences_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse preferences response: {}", e),
+                    })?;
 
             info!("Preferences exported successfully");
 
@@ -893,15 +1262,19 @@ impl PdsClient {
     // NEWBOLD.md Step: goat bsky prefs import prefs.json (line 118)
     // Implements: Imports Bluesky preferences to new PDS
     #[instrument(skip(self), err)]
-    pub async fn import_preferences(&self, session: &ClientSessionCredentials, preferences_json: String) -> Result<ClientPreferencesImportResponse, ClientError> {
+    pub async fn import_preferences(
+        &self,
+        session: &ClientSessionCredentials,
+        preferences_json: String,
+    ) -> Result<ClientPreferencesImportResponse, ClientError> {
         info!("Importing preferences for DID: {}", session.did);
 
         // NEWBOLD.md: app.bsky.actor.putPreferences for preferences import
         let preferences_url = format!("{}/xrpc/app.bsky.actor.putPreferences", session.pds);
 
         // Parse the preferences JSON to extract just the preferences array
-        let preferences_data: serde_json::Value = serde_json::from_str(&preferences_json)
-            .map_err(|e| ClientError::NetworkError {
+        let preferences_data: serde_json::Value =
+            serde_json::from_str(&preferences_json).map_err(|e| ClientError::NetworkError {
                 message: format!("Failed to parse preferences JSON: {}", e),
             })?;
 
@@ -911,7 +1284,8 @@ impl PdsClient {
             "preferences": preferences_data.get("preferences").unwrap_or(&serde_json::json!([]))
         });
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&preferences_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .header("Content-Type", "application/json")
@@ -942,12 +1316,19 @@ impl PdsClient {
 
     /// Get PLC recommendation from PDS
     #[instrument(skip(self), err)]
-    pub async fn get_plc_recommendation(&self, session: &ClientSessionCredentials) -> Result<ClientPlcRecommendationResponse, ClientError> {
+    pub async fn get_plc_recommendation(
+        &self,
+        session: &ClientSessionCredentials,
+    ) -> Result<ClientPlcRecommendationResponse, ClientError> {
         info!("Getting PLC recommendation for DID: {}", session.did);
 
-        let plc_url = format!("{}/xrpc/com.atproto.identity.getRecommendedDidCredentials", session.pds);
+        let plc_url = format!(
+            "{}/xrpc/com.atproto.identity.getRecommendedDidCredentials",
+            session.pds
+        );
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&plc_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -957,10 +1338,13 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let plc_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse PLC recommendation response: {}", e),
-                })?;
+            let plc_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse PLC recommendation response: {}", e),
+                    })?;
 
             info!("PLC recommendation retrieved successfully");
 
@@ -983,12 +1367,19 @@ impl PdsClient {
 
     /// Request PLC token from PDS
     #[instrument(skip(self), err)]
-    pub async fn request_plc_token(&self, session: &ClientSessionCredentials) -> Result<ClientPlcTokenResponse, ClientError> {
+    pub async fn request_plc_token(
+        &self,
+        session: &ClientSessionCredentials,
+    ) -> Result<ClientPlcTokenResponse, ClientError> {
         info!("Requesting PLC token for DID: {}", session.did);
 
-        let token_url = format!("{}/xrpc/com.atproto.identity.requestPlcOperationSignature", session.pds);
+        let token_url = format!(
+            "{}/xrpc/com.atproto.identity.requestPlcOperationSignature",
+            session.pds
+        );
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&token_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -1002,7 +1393,8 @@ impl PdsClient {
 
             Ok(ClientPlcTokenResponse {
                 success: true,
-                message: "PLC token sent to email. Check your email for verification code.".to_string(),
+                message: "PLC token sent to email. Check your email for verification code."
+                    .to_string(),
             })
         } else {
             let error_text = response.text().await.unwrap_or_default();
@@ -1028,8 +1420,8 @@ impl PdsClient {
         info!("Signing PLC operation for DID: {}", session.did);
 
         // Parse the unsigned PLC operation
-        let plc_unsigned_value: serde_json::Value = serde_json::from_str(&plc_unsigned)
-            .map_err(|e| ClientError::NetworkError {
+        let plc_unsigned_value: serde_json::Value =
+            serde_json::from_str(&plc_unsigned).map_err(|e| ClientError::NetworkError {
                 message: format!("Invalid unsigned PLC operation: {}", e),
             })?;
 
@@ -1048,7 +1440,8 @@ impl PdsClient {
 
         info!("Making PLC signing request to: {}", sign_url);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&sign_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .header("Content-Type", "application/json")
@@ -1060,22 +1453,27 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let json_response: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse sign response: {}", e),
-                })?;
+            let json_response: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse sign response: {}", e),
+                    })?;
 
             info!("PLC operation signing response received");
 
             // Extract the 'operation' field from the response (matches Go implementation)
-            let operation = json_response.get("operation")
-                .ok_or_else(|| ClientError::NetworkError {
-                    message: "No 'operation' field in response".to_string(),
-                })?;
+            let operation =
+                json_response
+                    .get("operation")
+                    .ok_or_else(|| ClientError::NetworkError {
+                        message: "No 'operation' field in response".to_string(),
+                    })?;
 
             // Convert signed operation to pretty JSON string
-            let plc_signed = serde_json::to_string_pretty(operation)
-                .map_err(|e| ClientError::NetworkError {
+            let plc_signed =
+                serde_json::to_string_pretty(operation).map_err(|e| ClientError::NetworkError {
                     message: format!("Failed to serialize signed operation: {}", e),
                 })?;
 
@@ -1110,14 +1508,17 @@ impl PdsClient {
         info!("Submitting PLC operation for DID: {}", session.did);
 
         // Parse the signed PLC operation
-        let plc_signed_value: serde_json::Value = serde_json::from_str(&plc_signed)
-            .map_err(|e| ClientError::NetworkError {
+        let plc_signed_value: serde_json::Value =
+            serde_json::from_str(&plc_signed).map_err(|e| ClientError::NetworkError {
                 message: format!("Invalid signed PLC operation: {}", e),
             })?;
 
         // Construct the PLC submission endpoint URL
         // NEWBOLD.md: com.atproto.identity.submitPlcOperation for PLC operation submission
-        let submit_url = format!("{}/xrpc/com.atproto.identity.submitPlcOperation", session.pds);
+        let submit_url = format!(
+            "{}/xrpc/com.atproto.identity.submitPlcOperation",
+            session.pds
+        );
 
         // Wrap signed operation in IdentitySubmitPlcOperation_Input structure (matches Go implementation)
         let submission_payload = json!({
@@ -1126,7 +1527,8 @@ impl PdsClient {
 
         info!("Making PLC submission request to: {}", submit_url);
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&submit_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .header("Content-Type", "application/json")
@@ -1172,7 +1574,8 @@ impl PdsClient {
         info!("Making account activation request to: {}", activate_url);
 
         // Make the request - this is a POST with no body (AT Protocol requirement)
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&activate_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -1216,7 +1619,8 @@ impl PdsClient {
         info!("Making account deactivation request to: {}", deactivate_url);
 
         // Make the request - this is a POST with empty body
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&deactivate_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .header("Content-Type", "application/json")
@@ -1251,38 +1655,43 @@ impl PdsClient {
     // Implements: Generates service auth token for secure account creation on new PDS
     #[instrument(skip(self), err)]
     pub async fn get_service_auth(
-        &self, 
+        &self,
         session: &ClientSessionCredentials,
-        aud: &str,           // Target PDS service DID  
-        lxm: Option<&str>,   // Method restriction (e.g. com.atproto.server.createAccount)
-        exp: Option<u64>     // Expiration timestamp
+        aud: &str,         // Target PDS service DID
+        lxm: Option<&str>, // Method restriction (e.g. com.atproto.server.createAccount)
+        exp: Option<u64>,  // Expiration timestamp
     ) -> Result<ClientServiceAuthResponse, ClientError> {
-        info!("Generating service auth token for audience: {} (method: {:?})", aud, lxm);
-        
+        info!(
+            "Generating service auth token for audience: {} (method: {:?})",
+            aud, lxm
+        );
+
         // NEWBOLD.md: com.atproto.server.getServiceAuth for secure migration auth token
-        let mut service_auth_url = format!("{}/xrpc/com.atproto.server.getServiceAuth", session.pds);
+        let mut service_auth_url =
+            format!("{}/xrpc/com.atproto.server.getServiceAuth", session.pds);
         let mut query_params = Vec::new();
-        
+
         // Required parameter: aud (audience - target PDS service DID)
         query_params.push(format!("aud={}", aud));
-        
+
         // Optional parameter: lxm (method restriction)
         if let Some(method) = lxm {
             query_params.push(format!("lxm={}", method));
         }
-        
-        // Optional parameter: exp (expiration timestamp) 
+
+        // Optional parameter: exp (expiration timestamp)
         if let Some(expiration) = exp {
             query_params.push(format!("exp={}", expiration));
         }
-        
+
         // Build URL with query parameters (GET request, not POST)
         if !query_params.is_empty() {
             service_auth_url.push('?');
             service_auth_url.push_str(&query_params.join("&"));
         }
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&service_auth_url)
             .header("Authorization", format!("Bearer {}", session.access_jwt))
             .send()
@@ -1292,13 +1701,16 @@ impl PdsClient {
             })?;
 
         if response.status().is_success() {
-            let auth_data: serde_json::Value = response.json().await
-                .map_err(|e| ClientError::NetworkError {
-                    message: format!("Failed to parse service auth response: {}", e),
-                })?;
+            let auth_data: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| ClientError::NetworkError {
+                        message: format!("Failed to parse service auth response: {}", e),
+                    })?;
 
             let token = auth_data["token"].as_str().unwrap_or_default().to_string();
-            
+
             if token.is_empty() {
                 error!("Service auth token generation returned empty token");
                 return Ok(ClientServiceAuthResponse {
@@ -1340,33 +1752,47 @@ mod tests {
     #[test]
     fn test_derive_pds_url_from_handle() {
         let client = PdsClient::new();
-        
-        assert_eq!(client.derive_pds_url_from_handle("user.bsky.social"), "https://bsky.social");
-        assert_eq!(client.derive_pds_url_from_handle("user.blacksky.app"), "https://blacksky.app");
-        assert_eq!(client.derive_pds_url_from_handle("user.example.com"), "https://example.com");
+
+        assert_eq!(
+            client.derive_pds_url_from_handle("user.bsky.social"),
+            "https://bsky.social"
+        );
+        assert_eq!(
+            client.derive_pds_url_from_handle("user.blacksky.app"),
+            "https://blacksky.app"
+        );
+        assert_eq!(
+            client.derive_pds_url_from_handle("user.example.com"),
+            "https://example.com"
+        );
     }
 
     #[tokio::test]
     async fn test_resolve_pds_from_did() {
         let client = PdsClient::new();
-        
+
         // Test PLC DID - This should now try to resolve the actual DID document
         // Since "did:plc:abcd1234" is a fake DID, it will fail resolution
         // This is the correct behavior - we no longer hardcode bsky.social
         let result = client.resolve_pds_from_did("did:plc:abcd1234").await;
         assert!(result.is_err(), "Fake DID should fail resolution");
-        
+
         // Test Web DID - This should also fail since the domain doesn't exist
-        let result = client.resolve_pds_from_did("did:web:fake-nonexistent-domain.com").await;
+        let result = client
+            .resolve_pds_from_did("did:web:fake-nonexistent-domain.com")
+            .await;
         assert!(result.is_err(), "Fake web DID should fail resolution");
-        
+
         // Test unsupported DID method
         let result = client.resolve_pds_from_did("did:unknown:test").await;
         assert!(result.is_err(), "Unsupported DID method should fail");
-        
+
         // The error should be PdsOperationFailed for unsupported methods
         match result {
-            Err(ClientError::PdsOperationFailed { operation, message: _ }) => {
+            Err(ClientError::PdsOperationFailed {
+                operation,
+                message: _,
+            }) => {
                 assert_eq!(operation, "resolve_pds");
             }
             _ => panic!("Expected PdsOperationFailed error for unsupported DID method"),

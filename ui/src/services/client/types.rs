@@ -3,21 +3,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use js_sys;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-
 /// Get current time in seconds since UNIX epoch (WASM compatible)
 #[cfg(target_arch = "wasm32")]
 fn current_time_secs() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn current_time_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
 }
 
 /// DNS-over-HTTPS response structure matching Cloudflare's API
@@ -137,7 +126,7 @@ pub struct ClientCreateAccountResponse {
     pub message: String,
     pub session: Option<ClientSessionCredentials>,
     pub error_code: Option<String>, // AT Protocol error codes like "AlreadyExists"
-    pub resumable: bool, // Whether migration can be resumed from this error
+    pub resumable: bool,            // Whether migration can be resumed from this error
 }
 
 /// PDS provider information (mirrors API PdsProvider)
@@ -311,10 +300,10 @@ pub struct ClientAccountStatusResponse {
 /// Service auth request for secure account creation
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ClientServiceAuthRequest {
-    pub aud: String,                    // Target PDS service DID (audience)
-    pub lxm: Option<String>,           // Method restriction (e.g. "com.atproto.server.createAccount")
+    pub aud: String,         // Target PDS service DID (audience)
+    pub lxm: Option<String>, // Method restriction (e.g. "com.atproto.server.createAccount")
     #[serde(rename = "exp")]
-    pub expires_at: Option<u64>,       // Expiration timestamp (unix seconds)
+    pub expires_at: Option<u64>, // Expiration timestamp (unix seconds)
 }
 
 impl ClientServiceAuthRequest {
@@ -325,18 +314,22 @@ impl ClientServiceAuthRequest {
         } else {
             Some(current_time_secs() + 3600) // Default 1 hour
         };
-        
+
         Self {
             aud: target_pds_did.to_string(),
             lxm: Some("com.atproto.server.createAccount".to_string()),
             expires_at,
         }
     }
-    
+
     /// Create a generic service auth request
-    pub fn new(target_pds_did: &str, method: Option<&str>, expires_in_seconds: Option<u64>) -> Self {
+    pub fn new(
+        target_pds_did: &str,
+        method: Option<&str>,
+        expires_in_seconds: Option<u64>,
+    ) -> Self {
         let expires_at = expires_in_seconds.map(|duration| current_time_secs() + duration);
-        
+
         Self {
             aud: target_pds_did.to_string(),
             lxm: method.map(|s| s.to_string()),
@@ -350,7 +343,7 @@ impl ClientServiceAuthRequest {
 pub struct ClientServiceAuthResponse {
     pub success: bool,
     pub message: String,
-    pub token: Option<String>,         // The service auth JWT token
+    pub token: Option<String>, // The service auth JWT token
 }
 
 /// Sync list blobs response (matches Go SyncListBlobs_Output)
@@ -359,6 +352,6 @@ pub struct ClientServiceAuthResponse {
 pub struct ClientSyncListBlobsResponse {
     pub success: bool,
     pub message: String,
-    pub cids: Option<Vec<String>>,     // Simple CID list (matches Go []string)
-    pub cursor: Option<String>,        // Pagination cursor (matches Go *string)
+    pub cids: Option<Vec<String>>, // Simple CID list (matches Go []string)
+    pub cursor: Option<String>,    // Pagination cursor (matches Go *string)
 }

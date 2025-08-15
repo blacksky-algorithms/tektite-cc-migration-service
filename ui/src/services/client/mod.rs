@@ -2,75 +2,72 @@
 //
 // This module provides a complete client-side implementation for:
 // - DNS-over-HTTPS handle resolution
-// - PDS authentication and operations  
+// - PDS authentication and operations
 // - Session management with secure storage
 // - Identity resolution and validation
 //
 // This replaces server-side functions to create a fully browser-based migration service.
 
 pub mod cid;
-pub mod types;
-pub mod errors;
 pub mod dns_over_https;
+pub mod errors;
 pub mod identity_resolver;
-pub mod session;
 pub mod pds_client;
+pub mod session;
+pub mod types;
 
 #[cfg(test)]
 pub mod cursor_test;
 
 // Re-export core types for easy access
 pub use types::{
-    ClientSessionCredentials, 
-    ClientLoginRequest, 
-    ClientLoginResponse,
-    ClientCreateAccountRequest, 
-    ClientCreateAccountResponse,
-    ClientPdsProvider,
+    CachedDnsResponse,
     ClientAccountStatusResponse,
-    DidDocument,
-    // Repository types
-    ClientRepoExportResponse,
-    ClientRepoImportResponse,
+    ClientBlobExportResponse,
+    ClientBlobUploadResponse,
+    ClientCreateAccountRequest,
+    ClientCreateAccountResponse,
+    ClientLoginRequest,
+    ClientLoginResponse,
     // Blob types
     ClientMissingBlob,
     ClientMissingBlobsResponse,
-    ClientBlobExportResponse,
-    ClientBlobUploadResponse,
+    ClientPdsProvider,
+    // PLC types
+    ClientPlcRecommendationResponse,
+    ClientPlcSignResponse,
+    ClientPlcSubmitResponse,
+    ClientPlcTokenResponse,
     // Preferences types
     ClientPreferencesExportResponse,
     ClientPreferencesImportResponse,
-    // PLC types
-    ClientPlcRecommendationResponse,
-    ClientPlcTokenResponse,
-    ClientPlcSignResponse,
-    ClientPlcSubmitResponse,
+    // Repository types
+    ClientRepoExportResponse,
+    ClientRepoImportResponse,
     // Service Auth types
     ClientServiceAuthRequest,
     ClientServiceAuthResponse,
-    // Sync types  
+    ClientSessionCredentials,
+    // Sync types
     ClientSyncListBlobsResponse,
     // DNS types
     CloudflareDoHResponse,
-    DnsQuestion,
+    DidDocument,
     DnsAnswer,
-    CachedDnsResponse,
+    DnsQuestion,
 };
 
 // Re-export error types
-pub use errors::{ResolveError, ClientError, ClientResult};
+pub use errors::{ClientError, ClientResult, ResolveError};
 
 // Re-export main client classes
-pub use dns_over_https::{DnsResolver, DnsOverHttpsResolver};
+pub use dns_over_https::{DnsOverHttpsResolver, DnsResolver};
 pub use identity_resolver::{
-    WebIdentityResolver, 
-    resolve_handle_client_side,
-    resolve_handle_dns_doh,
-    resolve_handle_http,
-    determine_pds_provider_client_side,
+    determine_pds_provider_client_side, resolve_handle_client_side, resolve_handle_dns_doh,
+    resolve_handle_http, WebIdentityResolver,
 };
-pub use session::{SessionManager, MigrationSessionManager, JwtUtils};
 pub use pds_client::PdsClient;
+pub use session::{JwtUtils, MigrationSessionManager, SessionManager};
 
 /// Convenience factory for creating a complete client setup
 pub struct MigrationClient {
@@ -90,40 +87,51 @@ impl MigrationClient {
     }
 
     /// Login to old PDS and store session
-    pub async fn login_old_pds(&self, identifier: &str, password: &str) -> ClientResult<ClientLoginResponse> {
+    pub async fn login_old_pds(
+        &self,
+        identifier: &str,
+        password: &str,
+    ) -> ClientResult<ClientLoginResponse> {
         let response = self.pds_client.login(identifier, password).await?;
-        
+
         if response.success {
             if let Some(ref session) = response.session {
                 self.session_manager.store_old_session(session)?;
             }
         }
-        
+
         Ok(response)
     }
 
     /// Create account on new PDS and store session
-    pub async fn create_account_new_pds(&self, request: ClientCreateAccountRequest) -> ClientResult<ClientCreateAccountResponse> {
+    pub async fn create_account_new_pds(
+        &self,
+        request: ClientCreateAccountRequest,
+    ) -> ClientResult<ClientCreateAccountResponse> {
         let response = self.pds_client.create_account(request).await?;
-        
+
         if response.success {
             if let Some(ref session) = response.session {
                 self.session_manager.store_new_session(session)?;
             }
         }
-        
+
         Ok(response)
     }
 
     /// Resolve handle using DNS-over-HTTPS
     pub async fn resolve_handle(&self, handle: &str) -> ClientResult<String> {
-        self.identity_resolver.resolve_handle(handle).await
+        self.identity_resolver
+            .resolve_handle(handle)
+            .await
             .map_err(ClientError::from)
     }
 
     /// Determine PDS provider for handle or DID
     pub async fn determine_provider(&self, handle_or_did: &str) -> ClientPdsProvider {
-        self.identity_resolver.determine_provider(handle_or_did).await
+        self.identity_resolver
+            .determine_provider(handle_or_did)
+            .await
     }
 
     /// Get stored old PDS session
@@ -157,7 +165,7 @@ impl Default for MigrationClient {
 pub mod compat {
     //! Compatibility functions that mirror the API module structure
     //! to ease migration from server-side to client-side operations
-    
+
     use super::*;
 
     /// Resolve handle using client-side DNS-over-HTTPS (replaces api::resolve_handle_shared)
@@ -174,13 +182,17 @@ pub mod compat {
     }
 
     /// Create account using client-side operations (replaces api::create_account)
-    pub async fn create_account(form: ClientCreateAccountRequest) -> ClientResult<ClientCreateAccountResponse> {
+    pub async fn create_account(
+        form: ClientCreateAccountRequest,
+    ) -> ClientResult<ClientCreateAccountResponse> {
         let client = PdsClient::new();
         client.create_account(form).await
     }
 
     /// Check account status using client-side operations (replaces api::check_account_status)
-    pub async fn check_account_status(session: ClientSessionCredentials) -> ClientResult<ClientAccountStatusResponse> {
+    pub async fn check_account_status(
+        session: ClientSessionCredentials,
+    ) -> ClientResult<ClientAccountStatusResponse> {
         let client = PdsClient::new();
         client.check_account_status(&session).await
     }
@@ -199,7 +211,7 @@ mod tests {
     #[tokio::test]
     async fn test_migration_client_integration() {
         let client = MigrationClient::new();
-        
+
         // Test handle resolution
         let result = client.resolve_handle("rudyfraser.com").await;
         match result {
@@ -212,7 +224,7 @@ mod tests {
                 println!("Handle resolution failed (expected in test): {}", e);
             }
         }
-        
+
         // Test provider determination
         let provider = client.determine_provider("user.bsky.social").await;
         assert_eq!(provider, ClientPdsProvider::Bluesky);
@@ -221,11 +233,11 @@ mod tests {
     #[test]
     fn test_client_validation() {
         let client = MigrationClient::new();
-        
+
         // Test handle validation
         assert!(client.identity_resolver.is_valid_handle("user.example.com"));
         assert!(!client.identity_resolver.is_valid_handle("invalid"));
-        
+
         // Test DID validation
         assert!(client.identity_resolver.is_valid_did("did:plc:abcd1234"));
         assert!(!client.identity_resolver.is_valid_did("not-a-did"));
