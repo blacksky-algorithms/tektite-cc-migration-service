@@ -110,13 +110,17 @@ impl LocalStorageManager {
 
     // Session type conversion utilities for client-side migration
     #[cfg(feature = "web")]
-    pub fn store_client_session_as_old(client_session: &ClientSessionCredentials) -> Result<(), StorageError> {
+    pub fn store_client_session_as_old(
+        client_session: &ClientSessionCredentials,
+    ) -> Result<(), StorageError> {
         let session = Self::client_to_session(client_session);
         Self::store_old_session(&session)
     }
 
     #[cfg(feature = "web")]
-    pub fn store_client_session_as_new(client_session: &ClientSessionCredentials) -> Result<(), StorageError> {
+    pub fn store_client_session_as_new(
+        client_session: &ClientSessionCredentials,
+    ) -> Result<(), StorageError> {
         let session = Self::client_to_session(client_session);
         Self::store_new_session(&session)
     }

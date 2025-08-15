@@ -105,7 +105,7 @@ pub enum FormStep {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum MigrationCheckpoint {
     AccountCreated,      // Account exists, need repo migration
-    RepoMigrated,        // Repo imported, need blob migration  
+    RepoMigrated,        // Repo imported, need blob migration
     BlobsMigrated,       // Blobs imported, need preferences migration
     PreferencesMigrated, // Preferences migrated, need PLC operations
     PlcReady,            // Ready for Form 4 transition
@@ -184,7 +184,7 @@ pub enum MigrationAction {
     SetPreferencesProgress(PreferencesProgress),
     SetPlcProgress(PlcProgress),
     SetMigrationCompleted(bool),
-    
+
     // PLC recommendation storage
     SetPlcRecommendation(Option<String>),
 }
@@ -202,8 +202,7 @@ pub struct LoginForm {
     pub original_handle: String,
 }
 
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PdsSelectionForm {
     pub pds_url: String,
     pub submitted: bool,
@@ -211,8 +210,7 @@ pub struct PdsSelectionForm {
     pub is_describing: bool,
 }
 
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct MigrationDetailsForm {
     pub handle: String,
     pub password: String,
@@ -223,8 +221,7 @@ pub struct MigrationDetailsForm {
     pub is_checking_handle: bool,
 }
 
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PlcVerificationForm {
     pub verification_code: String,
     pub plc_unsigned: String,
@@ -241,8 +238,7 @@ pub struct ValidationStates {
 
 // Migration progress tracking structures
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct MigrationProgress {
     // Repository migration
     pub repo_exported: bool,
@@ -282,8 +278,7 @@ pub struct MigrationProgress {
     pub last_checkpoint: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct RepoProgress {
     pub export_complete: bool,
     pub import_complete: bool,
@@ -292,8 +287,7 @@ pub struct RepoProgress {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct BlobProgress {
     pub total_blobs: u32,
     pub processed_blobs: u32,
@@ -306,16 +300,14 @@ pub struct BlobProgress {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PreferencesProgress {
     pub export_complete: bool,
     pub import_complete: bool,
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PlcProgress {
     pub recommendation_complete: bool,
     pub token_requested: bool,
@@ -540,9 +532,6 @@ impl Default for LoginForm {
     }
 }
 
-
-
-
 impl Default for ValidationStates {
     fn default() -> Self {
         Self {
@@ -552,11 +541,6 @@ impl Default for ValidationStates {
         }
     }
 }
-
-
-
-
-
 
 impl Default for MigrationState {
     fn default() -> Self {
