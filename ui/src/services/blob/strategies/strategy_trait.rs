@@ -1,13 +1,13 @@
 //! Migration strategy trait definition
 
-use async_trait::async_trait;
-use dioxus::prelude::*;
+use crate::features::migration::types::MigrationAction;
 use crate::services::{
-    client::{ClientMissingBlob, ClientSessionCredentials},
     blob::blob_fallback_manager::FallbackBlobManager,
+    client::{ClientMissingBlob, ClientSessionCredentials},
     errors::MigrationResult,
 };
-use crate::features::migration::types::MigrationAction;
+use async_trait::async_trait;
+use dioxus::prelude::*;
 
 /// Result of a blob migration operation
 #[derive(Debug, Clone)]
@@ -39,19 +39,19 @@ pub trait MigrationStrategy {
         blob_manager: &mut FallbackBlobManager,
         dispatch: &EventHandler<MigrationAction>,
     ) -> MigrationResult<BlobMigrationResult>;
-    
+
     /// Get the strategy name
     fn name(&self) -> &'static str;
-    
+
     /// Check if this strategy supports the given blob count
     fn supports_blob_count(&self, count: u32) -> bool;
-    
+
     /// Check if this strategy supports the given storage backend
     fn supports_storage_backend(&self, backend: &str) -> bool;
-    
+
     /// Get the priority of this strategy (higher is better)
     fn priority(&self) -> u32;
-    
+
     /// Estimate the memory usage for the given blob count
     fn estimate_memory_usage(&self, blob_count: u32) -> u64;
 }

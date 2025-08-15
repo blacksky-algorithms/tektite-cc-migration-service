@@ -5,13 +5,16 @@
 //! and larger storage capacity than LocalStorage while being more widely supported than OPFS.
 
 use crate::services::config::get_global_config;
-use gloo_console as console;
+use crate::{console_debug, console_error, console_info, console_warn};
 
 /// Helper function to safely format u64 values for logging to avoid BigInt serialization issues
 fn format_bytes(bytes: u64) -> String {
     bytes.to_string()
 }
-use idb::{Database, DatabaseEvent, Error as IdbError, Factory, ObjectStoreParams, TransactionMode, KeyPath};
+use idb::{
+    Database, DatabaseEvent, Error as IdbError, Factory, KeyPath, ObjectStoreParams,
+    TransactionMode,
+};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::JsValue;
@@ -44,11 +47,17 @@ impl std::fmt::Display for IdbBlobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             IdbBlobError::DatabaseError(msg) => write!(f, "IndexedDB Database Error: {}", msg),
-            IdbBlobError::NotSupported => write!(f, "IndexedDB is not supported in this environment"),
+            IdbBlobError::NotSupported => {
+                write!(f, "IndexedDB is not supported in this environment")
+            }
             IdbBlobError::NotFound(cid) => write!(f, "Blob not found in IndexedDB: {}", cid),
             IdbBlobError::StorageQuotaExceeded => write!(f, "IndexedDB storage quota exceeded"),
-            IdbBlobError::SerializationError(msg) => write!(f, "IndexedDB serialization error: {}", msg),
-            IdbBlobError::TransactionError(msg) => write!(f, "IndexedDB transaction error: {}", msg),
+            IdbBlobError::SerializationError(msg) => {
+                write!(f, "IndexedDB serialization error: {}", msg)
+            }
+            IdbBlobError::TransactionError(msg) => {
+                write!(f, "IndexedDB transaction error: {}", msg)
+            }
             IdbBlobError::Unknown(msg) => write!(f, "Unknown IndexedDB error: {}", msg),
         }
     }
@@ -57,32 +66,44 @@ impl std::fmt::Display for IdbBlobError {
 impl From<IdbError> for IdbBlobError {
     fn from(err: IdbError) -> Self {
         let error_msg = format!("{:?}", err);
-        console::debug!("[IdbBlobStorage] 🔄 Converting IDB error: {}", &error_msg);
-        
+        console_debug!("{}", format!("[IdbBlobStorage] 🔄 Converting IDB error: {}", &error_msg));
+
         // Enhanced error classification with better logging
-        if error_msg.contains("QuotaExceededError") || error_msg.contains("quota") || error_msg.contains("storage") {
-            console::warn!("[IdbBlobStorage] 💾 Storage quota exceeded - user may need to clear browser data or request more storage");
+        if error_msg.contains("QuotaExceededError")
+            || error_msg.contains("quota")
+            || error_msg.contains("storage")
+        {
+            console_warn!("[IdbBlobStorage] 💾 Storage quota exceeded - user may need to clear browser data or request more storage");
             IdbBlobError::StorageQuotaExceeded
         } else if error_msg.contains("NotSupportedError") || error_msg.contains("not supported") {
-            console::error!("[IdbBlobStorage] 🚫 IndexedDB not supported in this browser/context");
+            console_error!("[IdbBlobStorage] 🚫 IndexedDB not supported in this browser/context");
             IdbBlobError::NotSupported
         } else if error_msg.contains("NotFoundError") || error_msg.contains("not found") {
-            console::debug!("[IdbBlobStorage] 🔍 Record not found in IndexedDB (this may be expected)");
+            console_debug!(
+                "[IdbBlobStorage] 🔍 Record not found in IndexedDB (this may be expected)"
+            );
             IdbBlobError::NotFound("Record not found in IndexedDB".to_string())
         } else if error_msg.contains("VersionError") || error_msg.contains("version") {
-            console::error!("[IdbBlobStorage] 🔄 Database version conflict - may need to handle upgrade");
+            console_error!(
+                "[IdbBlobStorage] 🔄 Database version conflict - may need to handle upgrade"
+            );
             IdbBlobError::DatabaseError(format!("Database version error: {}", error_msg))
         } else if error_msg.contains("InvalidStateError") || error_msg.contains("invalid state") {
-            console::error!("[IdbBlobStorage] ⚠️ Invalid database state - transaction may have failed");
+            console_error!(
+                "[IdbBlobStorage] ⚠️ Invalid database state - transaction may have failed"
+            );
             IdbBlobError::TransactionError(format!("Invalid state error: {}", error_msg))
         } else if error_msg.contains("AbortError") || error_msg.contains("abort") {
-            console::warn!("[IdbBlobStorage] 🛑 Database operation was aborted");
+            console_warn!("[IdbBlobStorage] 🛑 Database operation was aborted");
             IdbBlobError::TransactionError(format!("Operation aborted: {}", error_msg))
         } else if error_msg.contains("TimeoutError") || error_msg.contains("timeout") {
-            console::warn!("[IdbBlobStorage] ⏱️ Database operation timed out");
+            console_warn!("[IdbBlobStorage] ⏱️ Database operation timed out");
             IdbBlobError::TransactionError(format!("Operation timeout: {}", error_msg))
         } else {
-            console::error!("[IdbBlobStorage] ❓ Unknown IndexedDB error type: {}", &error_msg);
+            console_error!("{}", format!(
+                "[IdbBlobStorage] ❓ Unknown IndexedDB error type: {}",
+                &error_msg
+            ));
             IdbBlobError::DatabaseError(error_msg)
         }
     }
@@ -112,93 +133,119 @@ pub struct IdbBlobManager {
 impl IdbBlobManager {
     /// Create a new IndexedDB blob manager
     pub async fn new() -> Result<Self, IdbBlobError> {
-        console::info!("[IdbBlobManager] Initializing IndexedDB blob storage");
+        console_info!("[IdbBlobManager] Initializing IndexedDB blob storage");
 
         // Get IndexedDB factory
         let factory = Factory::new().map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to create IDB factory: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] Failed to create IDB factory: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::from(e)
         })?;
 
-        console::debug!("[IdbBlobManager] IDB factory created successfully");
+        console_debug!("[IdbBlobManager] IDB factory created successfully");
 
         // Open database with upgrade handler
         let mut open_request = factory.open(DB_NAME, Some(DB_VERSION)).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to open database: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] Failed to open database: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::from(e)
         })?;
 
-        console::debug!("[IdbBlobManager] Database open request created");
+        console_debug!("[IdbBlobManager] Database open request created");
 
         // Set up database upgrade handler
         open_request.on_upgrade_needed(|event| {
-            console::info!("[IdbBlobManager] Setting up database schema");
-            
+            console_info!("[IdbBlobManager] Setting up database schema");
+
             let database = event.database().unwrap();
-            
+
             // Create blob object store
             let mut blob_store_params = ObjectStoreParams::new();
             blob_store_params.key_path(Some(KeyPath::new_single("cid")));
-            
+
             let _blob_store = database
                 .create_object_store(BLOB_STORE_NAME, blob_store_params)
                 .unwrap();
-            console::debug!("[IdbBlobManager] Created blob object store");
+            console_debug!("[IdbBlobManager] Created blob object store");
 
             // Create metadata object store
             let mut metadata_store_params = ObjectStoreParams::new();
             metadata_store_params.key_path(Some(KeyPath::new_single("key")));
-            
+
             let _metadata_store = database
                 .create_object_store(METADATA_STORE_NAME, metadata_store_params)
                 .unwrap();
-            console::debug!("[IdbBlobManager] Created metadata object store");
+            console_debug!("[IdbBlobManager] Created metadata object store");
 
-            console::info!("[IdbBlobManager] Database schema setup completed");
+            console_info!("[IdbBlobManager] Database schema setup completed");
         });
 
         // Await database opening
-        console::debug!("[IdbBlobManager] Awaiting database open...");
+        console_debug!("[IdbBlobManager] Awaiting database open...");
         let database = open_request.await.map_err(|e| {
-            console::error!("[IdbBlobManager] Database open failed: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] Database open failed: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::from(e)
         })?;
 
-        console::info!("[IdbBlobManager] IndexedDB blob manager initialized successfully");
+        console_info!("[IdbBlobManager] IndexedDB blob manager initialized successfully");
 
         Ok(Self { database })
     }
 
     /// Store a blob in IndexedDB
     pub async fn store_blob(&self, cid: &str, data: Vec<u8>) -> Result<(), IdbBlobError> {
-        console::info!("[IdbBlobManager] Storing blob {} ({} bytes)", cid, format_bytes(data.len() as u64));
+        console_info!("{}", format!(
+            "[IdbBlobManager] Storing blob {} ({} bytes)",
+            cid,
+            format_bytes(data.len() as u64)
+        ));
 
         // Check if we would exceed storage quota
         let current_usage = self.get_storage_usage().await.unwrap_or(0);
         let config = get_global_config();
         if current_usage + data.len() as u64 > config.storage.indexeddb_limit {
-            console::error!("[IdbBlobManager] Storage quota would be exceeded");
+            console_error!("[IdbBlobManager] Storage quota would be exceeded");
             return Err(IdbBlobError::StorageQuotaExceeded);
         }
 
         // Create transaction
-        let transaction = self.database
-            .transaction(&[BLOB_STORE_NAME, METADATA_STORE_NAME], TransactionMode::ReadWrite)
+        let transaction = self
+            .database
+            .transaction(
+                &[BLOB_STORE_NAME, METADATA_STORE_NAME],
+                TransactionMode::ReadWrite,
+            )
             .map_err(|e| {
-                console::error!("[IdbBlobManager] Failed to create transaction: {}", format!("{:?}", e));
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to create transaction: {}",
+                    format!("{:?}", e)
+                ));
                 IdbBlobError::TransactionError(format!("Failed to create transaction: {:?}", e))
             })?;
 
-        console::debug!("[IdbBlobManager] Transaction created for blob {}", cid);
+        console_debug!("{}", format!("[IdbBlobManager] Transaction created for blob {}", cid));
 
         // Get object stores
         let blob_store = transaction.object_store(BLOB_STORE_NAME).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to get blob store: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] Failed to get blob store: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::TransactionError(format!("Failed to get blob store: {:?}", e))
         })?;
 
         let metadata_store = transaction.object_store(METADATA_STORE_NAME).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to get metadata store: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] Failed to get metadata store: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::TransactionError(format!("Failed to get metadata store: {:?}", e))
         })?;
 
@@ -211,22 +258,37 @@ impl IdbBlobManager {
         });
 
         // Store blob data
-        let blob_js_value = blob_record.serialize(&Serializer::json_compatible()).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to serialize blob: {}", format!("{:?}", e));
-            IdbBlobError::SerializationError(format!("Failed to serialize blob: {:?}", e))
-        })?;
+        let blob_js_value = blob_record
+            .serialize(&Serializer::json_compatible())
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to serialize blob: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::SerializationError(format!("Failed to serialize blob: {:?}", e))
+            })?;
 
-        console::debug!("[IdbBlobManager] Serialized blob data for {}", cid);
+        console_debug!("{}", format!("[IdbBlobManager] Serialized blob data for {}", cid));
 
-        blob_store.put(&blob_js_value, None).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to store blob: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?.await.map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to complete blob storage: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?;
+        blob_store
+            .put(&blob_js_value, None)
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to store blob: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?
+            .await
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to complete blob storage: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?;
 
-        console::debug!("[IdbBlobManager] Blob {} stored in object store", cid);
+        console_debug!("{}", format!("[IdbBlobManager] Blob {} stored in object store", cid));
 
         // Create metadata record
         let metadata = BlobMetadata {
@@ -240,139 +302,236 @@ impl IdbBlobManager {
             "metadata": metadata
         });
 
-        let metadata_js_value = metadata_record.serialize(&Serializer::json_compatible()).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to serialize metadata: {}", format!("{:?}", e));
-            IdbBlobError::SerializationError(format!("Failed to serialize metadata: {:?}", e))
-        })?;
+        let metadata_js_value = metadata_record
+            .serialize(&Serializer::json_compatible())
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to serialize metadata: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::SerializationError(format!("Failed to serialize metadata: {:?}", e))
+            })?;
 
-        metadata_store.put(&metadata_js_value, None).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to store metadata: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?.await.map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to complete metadata storage: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?;
+        metadata_store
+            .put(&metadata_js_value, None)
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to store metadata: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?
+            .await
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to complete metadata storage: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?;
 
-        console::debug!("[IdbBlobManager] Metadata stored for blob {}", cid);
+        console_debug!("{}", format!("[IdbBlobManager] Metadata stored for blob {}", cid));
 
         // Commit transaction
-        transaction.commit().map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to commit transaction: {}", format!("{:?}", e));
-            IdbBlobError::TransactionError(format!("Failed to commit transaction: {:?}", e))
-        })?.await.map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to complete transaction commit: {}", format!("{:?}", e));
-            IdbBlobError::TransactionError(format!("Failed to complete transaction commit: {:?}", e))
-        })?;
+        transaction
+            .commit()
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to commit transaction: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::TransactionError(format!("Failed to commit transaction: {:?}", e))
+            })?
+            .await
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to complete transaction commit: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::TransactionError(format!(
+                    "Failed to complete transaction commit: {:?}",
+                    e
+                ))
+            })?;
 
-        console::info!("[IdbBlobManager] Successfully stored blob {} ({} bytes)", cid, format_bytes(data.len() as u64));
+        console_info!("{}", format!(
+            "[IdbBlobManager] Successfully stored blob {} ({} bytes)",
+            cid,
+            format_bytes(data.len() as u64)
+        ));
         Ok(())
     }
 
     /// Store blob with retry logic
-    pub async fn store_blob_with_retry(&self, cid: &str, data: Vec<u8>) -> Result<(), IdbBlobError> {
+    pub async fn store_blob_with_retry(
+        &self,
+        cid: &str,
+        data: Vec<u8>,
+    ) -> Result<(), IdbBlobError> {
         let config = get_global_config();
         const BASE_DELAY_MS: u64 = 1000;
-        
-        console::info!("[IdbBlobManager] Storing blob {} with retry logic ({} bytes)", cid, format_bytes(data.len() as u64));
-        
+
+        console_info!("{}", format!(
+            "[IdbBlobManager] Storing blob {} with retry logic ({} bytes)",
+            cid,
+            format_bytes(data.len() as u64)
+        ));
+
         let mut attempts = 0;
         let mut last_error = None;
 
         while attempts < config.retry.storage_retries {
             attempts += 1;
-            console::debug!("[IdbBlobManager] Attempt {} for blob {}", attempts, cid);
+            console_debug!("{}", format!("[IdbBlobManager] Attempt {} for blob {}", attempts, cid));
 
             match self.store_blob(cid, data.clone()).await {
                 Ok(()) => {
-                    console::info!("[IdbBlobManager] Successfully stored blob {} on attempt {}", cid, attempts);
+                    console_info!("{}", format!(
+                        "[IdbBlobManager] Successfully stored blob {} on attempt {}",
+                        cid,
+                        attempts
+                    ));
                     return Ok(());
                 }
                 Err(e) => {
-                    console::warn!("[IdbBlobManager] Attempt {} failed for blob {}: {}", attempts, cid, format!("{}", e));
+                    console_warn!("{}", format!(
+                        "[IdbBlobManager] Attempt {} failed for blob {}: {}",
+                        attempts,
+                        cid,
+                        format!("{}", e)
+                    ));
                     last_error = Some(e);
 
                     if attempts < config.retry.storage_retries {
                         let delay_ms = BASE_DELAY_MS * (2_u64.pow(attempts - 1));
-                        console::info!("[IdbBlobManager] Retrying in {} ms", delay_ms);
+                        console_info!("{}", format!("[IdbBlobManager] Retrying in {} ms", delay_ms));
                         // Note: In WASM, we typically don't need actual delays for retry
                     }
                 }
             }
         }
 
-        let error = last_error.unwrap_or_else(|| IdbBlobError::Unknown("Unknown retry error".to_string()));
-        console::error!("[IdbBlobManager] Failed to store blob {} after {} attempts: {}", cid, config.retry.storage_retries, format!("{}", error));
+        let error =
+            last_error.unwrap_or_else(|| IdbBlobError::Unknown("Unknown retry error".to_string()));
+        console_error!("{}", format!(
+            "[IdbBlobManager] Failed to store blob {} after {} attempts: {}",
+            cid,
+            config.retry.storage_retries,
+            format!("{}", error)
+        ));
         Err(error)
     }
 
     /// Retrieve a blob from IndexedDB
     pub async fn retrieve_blob(&self, cid: &str) -> Result<Vec<u8>, IdbBlobError> {
-        console::info!("[IdbBlobManager] Retrieving blob {}", cid);
+        console_info!("{}", format!("[IdbBlobManager] Retrieving blob {}", cid));
 
         // Create read-only transaction
-        let transaction = self.database
+        let transaction = self
+            .database
             .transaction(&[BLOB_STORE_NAME], TransactionMode::ReadOnly)
             .map_err(|e| {
-                console::error!("[IdbBlobManager] Failed to create read transaction: {}", format!("{:?}", e));
-                IdbBlobError::TransactionError(format!("Failed to create read transaction: {:?}", e))
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to create read transaction: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::TransactionError(format!(
+                    "Failed to create read transaction: {:?}",
+                    e
+                ))
             })?;
 
         let blob_store = transaction.object_store(BLOB_STORE_NAME).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to get blob store for read: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] Failed to get blob store for read: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::TransactionError(format!("Failed to get blob store for read: {:?}", e))
         })?;
 
-        console::debug!("[IdbBlobManager] Querying blob store for {}", cid);
+        console_debug!("{}", format!("[IdbBlobManager] Querying blob store for {}", cid));
 
         // Get blob record
         let cid_js = JsValue::from_str(cid);
-        let blob_record: Option<JsValue> = blob_store.get(cid_js).map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to query blob: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?.await.map_err(|e| {
-            console::error!("[IdbBlobManager] Failed to complete blob query: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?;
+        let blob_record: Option<JsValue> = blob_store
+            .get(cid_js)
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to query blob: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?
+            .await
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] Failed to complete blob query: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?;
 
         // Wait for transaction to complete
         transaction.await.map_err(|e| {
-            console::error!("[IdbBlobManager] Transaction failed during blob retrieval: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] Transaction failed during blob retrieval: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::from(e)
         })?;
 
         match blob_record {
             Some(record) => {
-                console::debug!("[IdbBlobManager] Found blob record for {}", cid);
-                
+                console_debug!("{}", format!("[IdbBlobManager] Found blob record for {}", cid));
+
                 // Deserialize the blob record
-                let blob_data: serde_json::Value = serde_wasm_bindgen::from_value(record).map_err(|e| {
-                    console::error!("[IdbBlobManager] Failed to deserialize blob record: {}", format!("{:?}", e));
-                    IdbBlobError::SerializationError(format!("Failed to deserialize blob record: {:?}", e))
-                })?;
+                let blob_data: serde_json::Value =
+                    serde_wasm_bindgen::from_value(record).map_err(|e| {
+                        console_error!("{}", format!(
+                            "[IdbBlobManager] Failed to deserialize blob record: {}",
+                            format!("{:?}", e)
+                        ));
+                        IdbBlobError::SerializationError(format!(
+                            "Failed to deserialize blob record: {:?}",
+                            e
+                        ))
+                    })?;
 
                 // Extract data array
-                let data_array = blob_data.get("data")
+                let data_array = blob_data
+                    .get("data")
                     .and_then(|v| v.as_array())
                     .ok_or_else(|| {
-                        console::error!("[IdbBlobManager] Blob record missing or invalid data field");
-                        IdbBlobError::SerializationError("Blob record missing or invalid data field".to_string())
+                        console_error!(
+                            "[IdbBlobManager] Blob record missing or invalid data field"
+                        );
+                        IdbBlobError::SerializationError(
+                            "Blob record missing or invalid data field".to_string(),
+                        )
                     })?;
 
                 // Convert to Vec<u8>
-                let data: Result<Vec<u8>, _> = data_array.iter()
+                let data: Result<Vec<u8>, _> = data_array
+                    .iter()
                     .map(|v| v.as_u64().map(|n| n as u8))
                     .collect::<Option<Vec<u8>>>()
                     .ok_or_else(|| {
-                        console::error!("[IdbBlobManager] Invalid data format in blob record");
-                        IdbBlobError::SerializationError("Invalid data format in blob record".to_string())
+                        console_error!("[IdbBlobManager] Invalid data format in blob record");
+                        IdbBlobError::SerializationError(
+                            "Invalid data format in blob record".to_string(),
+                        )
                     });
 
                 let data = data?;
-                console::info!("[IdbBlobManager] Successfully retrieved blob {} ({} bytes)", cid, format_bytes(data.len() as u64));
+                console_info!("{}", format!(
+                    "[IdbBlobManager] Successfully retrieved blob {} ({} bytes)",
+                    cid,
+                    format_bytes(data.len() as u64)
+                ));
                 Ok(data)
             }
             None => {
-                console::warn!("[IdbBlobManager] Blob {} not found in IndexedDB", cid);
+                console_warn!("{}", format!("[IdbBlobManager] Blob {} not found in IndexedDB", cid));
                 Err(IdbBlobError::NotFound(cid.to_string()))
             }
         }
@@ -380,15 +539,15 @@ impl IdbBlobManager {
 
     /// Check if a blob exists in IndexedDB
     pub async fn has_blob(&self, cid: &str) -> bool {
-        console::debug!("[IdbBlobManager] Checking if blob {} exists", cid);
+        console_debug!("{}", format!("[IdbBlobManager] Checking if blob {} exists", cid));
 
         match self.get_blob_metadata(cid).await {
             Ok(_) => {
-                console::debug!("[IdbBlobManager] Blob {} exists", cid);
+                console_debug!("{}", format!("[IdbBlobManager] Blob {} exists", cid));
                 true
             }
             Err(_) => {
-                console::debug!("[IdbBlobManager] Blob {} does not exist", cid);
+                console_debug!("{}", format!("[IdbBlobManager] Blob {} does not exist", cid));
                 false
             }
         }
@@ -396,17 +555,25 @@ impl IdbBlobManager {
 
     /// Get blob metadata
     async fn get_blob_metadata(&self, cid: &str) -> Result<BlobMetadata, IdbBlobError> {
-        console::debug!("[IdbBlobManager] Retrieving metadata for blob {}", cid);
+        console_debug!("{}", format!("[IdbBlobManager] Retrieving metadata for blob {}", cid));
 
-        let transaction = self.database
+        let transaction = self
+            .database
             .transaction(&[METADATA_STORE_NAME], TransactionMode::ReadOnly)
-            .map_err(|e| IdbBlobError::TransactionError(format!("Failed to create metadata transaction: {:?}", e)))?;
+            .map_err(|e| {
+                IdbBlobError::TransactionError(format!(
+                    "Failed to create metadata transaction: {:?}",
+                    e
+                ))
+            })?;
 
-        let metadata_store = transaction.object_store(METADATA_STORE_NAME)
-            .map_err(|e| IdbBlobError::TransactionError(format!("Failed to get metadata store: {:?}", e)))?;
+        let metadata_store = transaction.object_store(METADATA_STORE_NAME).map_err(|e| {
+            IdbBlobError::TransactionError(format!("Failed to get metadata store: {:?}", e))
+        })?;
 
         let cid_js = JsValue::from_str(cid);
-        let metadata_record: Option<JsValue> = metadata_store.get(cid_js)
+        let metadata_record: Option<JsValue> = metadata_store
+            .get(cid_js)
             .map_err(IdbBlobError::from)?
             .await
             .map_err(IdbBlobError::from)?;
@@ -416,17 +583,28 @@ impl IdbBlobManager {
         match metadata_record {
             Some(record) => {
                 let metadata_data: serde_json::Value = serde_wasm_bindgen::from_value(record)
-                    .map_err(|e| IdbBlobError::SerializationError(format!("Failed to deserialize metadata: {:?}", e)))?;
+                    .map_err(|e| {
+                        IdbBlobError::SerializationError(format!(
+                            "Failed to deserialize metadata: {:?}",
+                            e
+                        ))
+                    })?;
 
                 let metadata: BlobMetadata = serde_json::from_value(
-                    metadata_data.get("metadata").unwrap_or(&serde_json::Value::Null).clone()
-                ).map_err(|e| IdbBlobError::SerializationError(format!("Invalid metadata format: {:?}", e)))?;
+                    metadata_data
+                        .get("metadata")
+                        .unwrap_or(&serde_json::Value::Null)
+                        .clone(),
+                )
+                .map_err(|e| {
+                    IdbBlobError::SerializationError(format!("Invalid metadata format: {:?}", e))
+                })?;
 
-                console::debug!("[IdbBlobManager] Retrieved metadata for blob {}", cid);
+                console_debug!("{}", format!("[IdbBlobManager] Retrieved metadata for blob {}", cid));
                 Ok(metadata)
             }
             None => {
-                console::debug!("[IdbBlobManager] No metadata found for blob {}", cid);
+                console_debug!("{}", format!("[IdbBlobManager] No metadata found for blob {}", cid));
                 Err(IdbBlobError::NotFound(cid.to_string()))
             }
         }
@@ -434,57 +612,80 @@ impl IdbBlobManager {
 
     /// Get current storage usage in bytes
     pub async fn get_storage_usage(&self) -> Result<u64, IdbBlobError> {
-        console::debug!("[IdbBlobManager] 📊 Calculating storage usage by iterating through metadata");
+        console_debug!(
+            "[IdbBlobManager] 📊 Calculating storage usage by iterating through metadata"
+        );
 
-        let transaction = self.database
+        let transaction = self
+            .database
             .transaction(&[METADATA_STORE_NAME], TransactionMode::ReadOnly)
             .map_err(|e| {
-                console::error!("[IdbBlobManager] ❌ Failed to create usage transaction: {}", format!("{:?}", e));
-                IdbBlobError::TransactionError(format!("Failed to create usage transaction: {:?}", e))
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to create usage transaction: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::TransactionError(format!(
+                    "Failed to create usage transaction: {:?}",
+                    e
+                ))
             })?;
 
-        let metadata_store = transaction.object_store(METADATA_STORE_NAME)
-            .map_err(|e| {
-                console::error!("[IdbBlobManager] ❌ Failed to get metadata store for usage: {}", format!("{:?}", e));
-                IdbBlobError::TransactionError(format!("Failed to get metadata store for usage: {:?}", e))
-            })?;
+        let metadata_store = transaction.object_store(METADATA_STORE_NAME).map_err(|e| {
+            console_error!("{}", format!(
+                "[IdbBlobManager] ❌ Failed to get metadata store for usage: {}",
+                format!("{:?}", e)
+            ));
+            IdbBlobError::TransactionError(format!(
+                "Failed to get metadata store for usage: {:?}",
+                e
+            ))
+        })?;
 
-        console::debug!("[IdbBlobManager] 🔍 Opening cursor to iterate through all blob metadata...");
-        
+        console_debug!(
+            "[IdbBlobManager] 🔍 Opening cursor to iterate through all blob metadata..."
+        );
+
         // Open cursor to iterate through all metadata records
-        let cursor_request = metadata_store.open_cursor(None, None)
-            .map_err(|e| {
-                console::error!("[IdbBlobManager] ❌ Failed to open cursor: {}", format!("{:?}", e));
-                IdbBlobError::from(e)
-            })?;
-            
-        let mut cursor_option = cursor_request.await
-            .map_err(|e| {
-                console::error!("[IdbBlobManager] ❌ Failed to get initial cursor: {}", format!("{:?}", e));
-                IdbBlobError::from(e)
-            })?;
-        
+        let cursor_request = metadata_store.open_cursor(None, None).map_err(|e| {
+            console_error!("{}", format!(
+                "[IdbBlobManager] ❌ Failed to open cursor: {}",
+                format!("{:?}", e)
+            ));
+            IdbBlobError::from(e)
+        })?;
+
+        let mut cursor_option = cursor_request.await.map_err(|e| {
+            console_error!("{}", format!(
+                "[IdbBlobManager] ❌ Failed to get initial cursor: {}",
+                format!("{:?}", e)
+            ));
+            IdbBlobError::from(e)
+        })?;
+
         let mut total_bytes = 0u64;
         let mut blob_count = 0u32;
-        
+
         // Iterate through all records
         while let Some(cursor) = cursor_option {
-            console::debug!("[IdbBlobManager] 📝 Processing metadata record...");
-            
+            console_debug!("[IdbBlobManager] 📝 Processing metadata record...");
+
             // Get the current record value
             let value = match cursor.value() {
                 Ok(v) => v,
                 Err(e) => {
-                    console::warn!("[IdbBlobManager] ⚠️ Failed to get cursor value: {}", format!("{:?}", e));
+                    console_warn!("{}", format!(
+                        "[IdbBlobManager] ⚠️ Failed to get cursor value: {}",
+                        format!("{:?}", e)
+                    ));
                     // Skip this record and move to next
                     cursor_option = cursor.next(None)
                         .map_err(|e| {
-                            console::error!("[IdbBlobManager] ❌ Failed to advance cursor after error: {}", format!("{:?}", e));
+                            console_error!("{}", format!("[IdbBlobManager] ❌ Failed to advance cursor after error: {:?}", e));
                             IdbBlobError::from(e)
                         })?
                         .await
                         .map_err(|e| {
-                            console::error!("[IdbBlobManager] ❌ Failed to await cursor advance after error: {}", format!("{:?}", e));
+                            console_error!("{}", format!("[IdbBlobManager] ❌ Failed to await cursor advance after error: {:?}", e));
                             IdbBlobError::from(e)
                         })?;
                     continue;
@@ -497,111 +698,237 @@ impl IdbBlobManager {
                             Ok(metadata) => {
                                 total_bytes += metadata.size;
                                 blob_count += 1;
-                                console::debug!("[IdbBlobManager] 📊 Blob {} contributes {} bytes", metadata.cid, metadata.size.to_string());
+                                console_debug!("{}", format!(
+                                    "[IdbBlobManager] 📊 Blob {} contributes {} bytes",
+                                    metadata.cid,
+                                    metadata.size.to_string()
+                                ));
                             }
                             Err(e) => {
-                                console::warn!("[IdbBlobManager] ⚠️ Failed to parse metadata record: {}", format!("{:?}", e));
+                                console_warn!("{}", format!(
+                                    "[IdbBlobManager] ⚠️ Failed to parse metadata record: {}",
+                                    format!("{:?}", e)
+                                ));
                                 // Continue with other records
                             }
                         }
                     } else {
-                        console::warn!("[IdbBlobManager] ⚠️ Metadata record missing 'metadata' field");
+                        console_warn!(
+                            "[IdbBlobManager] ⚠️ Metadata record missing 'metadata' field"
+                        );
                     }
                 }
                 Err(e) => {
-                    console::warn!("[IdbBlobManager] ⚠️ Failed to deserialize metadata record: {}", format!("{:?}", e));
+                    console_warn!("{}", format!(
+                        "[IdbBlobManager] ⚠️ Failed to deserialize metadata record: {}",
+                        format!("{:?}", e)
+                    ));
                     // Continue with other records
                 }
             }
-            
+
             // Move to next record using next()
-            cursor_option = cursor.next(None)
+            cursor_option = cursor
+                .next(None)
                 .map_err(|e| {
-                    console::error!("[IdbBlobManager] ❌ Failed to advance cursor: {}", format!("{:?}", e));
+                    console_error!("{}", format!(
+                        "[IdbBlobManager] ❌ Failed to advance cursor: {}",
+                        format!("{:?}", e)
+                    ));
                     IdbBlobError::from(e)
                 })?
                 .await
                 .map_err(|e| {
-                    console::error!("[IdbBlobManager] ❌ Failed to await cursor advance: {}", format!("{:?}", e));
+                    console_error!("{}", format!(
+                        "[IdbBlobManager] ❌ Failed to await cursor advance: {}",
+                        format!("{:?}", e)
+                    ));
                     IdbBlobError::from(e)
                 })?;
         }
 
-        console::debug!("[IdbBlobManager] ✅ Cursor iteration completed");
+        console_debug!("[IdbBlobManager] ✅ Cursor iteration completed");
 
         // Wait for transaction to complete
         transaction.await.map_err(|e| {
-            console::error!("[IdbBlobManager] ❌ Transaction failed during storage usage calculation: {}", format!("{:?}", e));
+            console_error!("{}", format!(
+                "[IdbBlobManager] ❌ Transaction failed during storage usage calculation: {}",
+                format!("{:?}", e)
+            ));
             IdbBlobError::from(e)
         })?;
 
-        console::info!("[IdbBlobManager] 📊 Storage usage calculated: {} bytes across {} blobs", format_bytes(total_bytes), blob_count);
+        console_info!("{}", format!(
+            "[IdbBlobManager] 📊 Storage usage calculated: {} bytes across {} blobs",
+            format_bytes(total_bytes),
+            blob_count
+        ));
         Ok(total_bytes)
     }
 
     /// Clean up all blobs from IndexedDB
     pub async fn cleanup_blobs(&self) -> Result<(), IdbBlobError> {
-        console::info!("[IdbBlobManager] 🧹 Starting cleanup of all blobs from IndexedDB");
+        console_info!("[IdbBlobManager] 🧹 Starting cleanup of all blobs from IndexedDB");
 
         // Get storage usage before cleanup for reporting
         let usage_before = self.get_storage_usage().await.unwrap_or(0);
-        console::info!("[IdbBlobManager] 📊 Storage usage before cleanup: {} bytes", format_bytes(usage_before));
+        console_info!("{}", format!(
+            "[IdbBlobManager] 📊 Storage usage before cleanup: {} bytes",
+            format_bytes(usage_before)
+        ));
 
-        console::debug!("[IdbBlobManager] 📝 Creating cleanup transaction...");
-        let transaction = self.database
-            .transaction(&[BLOB_STORE_NAME, METADATA_STORE_NAME], TransactionMode::ReadWrite)
+        console_debug!("[IdbBlobManager] 📝 Creating cleanup transaction...");
+        let transaction = self
+            .database
+            .transaction(
+                &[BLOB_STORE_NAME, METADATA_STORE_NAME],
+                TransactionMode::ReadWrite,
+            )
             .map_err(|e| {
-                console::error!("[IdbBlobManager] ❌ Failed to create cleanup transaction: {}", format!("{:?}", e));
-                IdbBlobError::TransactionError(format!("Failed to create cleanup transaction: {:?}", e))
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to create cleanup transaction: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::TransactionError(format!(
+                    "Failed to create cleanup transaction: {:?}",
+                    e
+                ))
             })?;
 
-        console::debug!("[IdbBlobManager] 🗂️ Getting object stores for cleanup...");
-        let blob_store = transaction.object_store(BLOB_STORE_NAME)
+        console_debug!("[IdbBlobManager] 🗂️ Getting object stores for cleanup...");
+        let blob_store = transaction.object_store(BLOB_STORE_NAME).map_err(|e| {
+            console_error!("{}", format!(
+                "[IdbBlobManager] ❌ Failed to get blob store for cleanup: {}",
+                format!("{:?}", e)
+            ));
+            IdbBlobError::TransactionError(format!("Failed to get blob store for cleanup: {:?}", e))
+        })?;
+
+        let metadata_store = transaction.object_store(METADATA_STORE_NAME).map_err(|e| {
+            console_error!("{}", format!(
+                "[IdbBlobManager] ❌ Failed to get metadata store for cleanup: {}",
+                format!("{:?}", e)
+            ));
+            IdbBlobError::TransactionError(format!(
+                "Failed to get metadata store for cleanup: {:?}",
+                e
+            ))
+        })?;
+
+        console_debug!("[IdbBlobManager] 🗑️ Clearing blob data store...");
+        blob_store
+            .clear()
             .map_err(|e| {
-                console::error!("[IdbBlobManager] ❌ Failed to get blob store for cleanup: {}", format!("{:?}", e));
-                IdbBlobError::TransactionError(format!("Failed to get blob store for cleanup: {:?}", e))
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to clear blob store: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?
+            .await
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to complete blob store clear: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
             })?;
 
-        let metadata_store = transaction.object_store(METADATA_STORE_NAME)
+        console_debug!("[IdbBlobManager] 🗑️ Clearing metadata store...");
+        metadata_store
+            .clear()
             .map_err(|e| {
-                console::error!("[IdbBlobManager] ❌ Failed to get metadata store for cleanup: {}", format!("{:?}", e));
-                IdbBlobError::TransactionError(format!("Failed to get metadata store for cleanup: {:?}", e))
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to clear metadata store: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
+            })?
+            .await
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to complete metadata store clear: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::from(e)
             })?;
 
-        console::debug!("[IdbBlobManager] 🗑️ Clearing blob data store...");
-        blob_store.clear().map_err(|e| {
-            console::error!("[IdbBlobManager] ❌ Failed to clear blob store: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?.await.map_err(|e| {
-            console::error!("[IdbBlobManager] ❌ Failed to complete blob store clear: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?;
+        console_debug!("[IdbBlobManager] 💾 Committing cleanup transaction...");
+        transaction
+            .commit()
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to commit cleanup transaction: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::TransactionError(format!("Failed to commit cleanup: {:?}", e))
+            })?
+            .await
+            .map_err(|e| {
+                console_error!("{}", format!(
+                    "[IdbBlobManager] ❌ Failed to complete cleanup commit: {}",
+                    format!("{:?}", e)
+                ));
+                IdbBlobError::TransactionError(format!("Failed to complete cleanup: {:?}", e))
+            })?;
 
-        console::debug!("[IdbBlobManager] 🗑️ Clearing metadata store...");
-        metadata_store.clear().map_err(|e| {
-            console::error!("[IdbBlobManager] ❌ Failed to clear metadata store: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?.await.map_err(|e| {
-            console::error!("[IdbBlobManager] ❌ Failed to complete metadata store clear: {}", format!("{:?}", e));
-            IdbBlobError::from(e)
-        })?;
-
-        console::debug!("[IdbBlobManager] 💾 Committing cleanup transaction...");
-        transaction.commit().map_err(|e| {
-            console::error!("[IdbBlobManager] ❌ Failed to commit cleanup transaction: {}", format!("{:?}", e));
-            IdbBlobError::TransactionError(format!("Failed to commit cleanup: {:?}", e))
-        })?.await.map_err(|e| {
-            console::error!("[IdbBlobManager] ❌ Failed to complete cleanup commit: {}", format!("{:?}", e));
-            IdbBlobError::TransactionError(format!("Failed to complete cleanup: {:?}", e))
-        })?;
-
-        console::info!("[IdbBlobManager] ✅ Successfully cleaned up all blobs from IndexedDB");
-        console::info!("[IdbBlobManager] 📊 Freed approximately {} bytes of storage", format_bytes(usage_before));
+        console_info!("[IdbBlobManager] ✅ Successfully cleaned up all blobs from IndexedDB");
+        console_info!("{}", format!(
+            "[IdbBlobManager] 📊 Freed approximately {} bytes of storage",
+            format_bytes(usage_before)
+        ));
         Ok(())
     }
 
     /// Get the storage backend name
     pub fn storage_name(&self) -> &'static str {
         "IndexedDB"
+    }
+
+    /// List all stored blob CIDs in IndexedDB storage
+    pub async fn list_stored_blobs(&self) -> Result<Vec<String>, IdbBlobError> {
+        console_debug!("[IdbBlobManager] 📋 Listing all stored blobs");
+        
+        let transaction = self
+            .database
+            .transaction(&[METADATA_STORE_NAME], TransactionMode::ReadOnly)
+            .map_err(|e| {
+                console_error!("[IdbBlobManager] Failed to create transaction");
+                IdbBlobError::TransactionError(format!("Failed to create transaction: {:?}", e))
+            })?;
+
+        let metadata_store = transaction
+            .object_store(METADATA_STORE_NAME)
+            .map_err(|e| {
+                console_error!("[IdbBlobManager] Failed to get metadata store");
+                IdbBlobError::TransactionError(format!("Failed to get metadata store: {:?}", e))
+            })?;
+
+        // Get all keys from the metadata store - provide required parameters
+        let request = metadata_store.get_all_keys(None, None).map_err(|e| {
+            console_error!("[IdbBlobManager] Failed to get all keys");
+            IdbBlobError::TransactionError(format!("Failed to get all keys: {:?}", e))
+        })?;
+
+        let keys_js = request.await.map_err(|e| {
+            console_error!("[IdbBlobManager] Failed to await get all keys");
+            IdbBlobError::TransactionError(format!("Failed to await get all keys: {:?}", e))
+        })?;
+
+        // Convert JavaScript values to Rust Vec<String>
+        let mut blob_cids = Vec::new();
+        // keys_js is already a Vec<JsValue>, so iterate directly
+        for key_js in keys_js {
+            if let Some(key_str) = key_js.as_string() {
+                blob_cids.push(key_str);
+            }
+        }
+
+        console_debug!("{}", format!(
+            "[IdbBlobManager] 📋 Found {} stored blobs",
+            blob_cids.len()
+        ));
+
+        Ok(blob_cids)
     }
 }

@@ -10,7 +10,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use gloo_storage::{LocalStorage, Storage};
 
 use crate::services::config::get_global_config;
-use gloo_console as console;
+use crate::{console_error, console_info, console_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -108,7 +108,7 @@ impl BlobManager {
     /// Create a new BlobManager instance
     #[cfg(feature = "web")]
     pub async fn new() -> Result<Self, BlobError> {
-        console::info!("[BlobManager] Initializing web storage blob manager");
+        console_info!("[BlobManager] Initializing web storage blob manager");
 
         let mut manager = BlobManager {
             current_usage_bytes: 0,
@@ -119,10 +119,13 @@ impl BlobManager {
         // Load existing metadata from storage
         manager.load_metadata()?;
 
-        console::info!(
-            "[BlobManager] Initialized with {} bytes used, {} blobs",
-            format!("{}", manager.current_usage_bytes),
-            manager.blob_count
+        console_info!(
+            "{}",
+            format!(
+                "[BlobManager] Initialized with {} bytes used, {} blobs",
+                manager.current_usage_bytes,
+                manager.blob_count
+            )
         );
 
         Ok(manager)
@@ -131,7 +134,7 @@ impl BlobManager {
     /// Create a new BlobManager instance (fallback for non-web)
     #[cfg(not(feature = "web"))]
     pub async fn new() -> Result<Self, BlobError> {
-        console::warn!("[BlobManager] using non-web instances of Blob-Manager");
+        console_warn!("[BlobManager] using non-web instances of Blob-Manager");
         Err(BlobError::WebStorageNotSupported)
     }
 
@@ -175,10 +178,8 @@ impl BlobManager {
     fn save_blob_metadata(&self, cid: &str, size: u64) -> Result<(), BlobError> {
         // Load existing metadata
         let mut blob_sizes = match LocalStorage::get::<String>(METADATA_KEY) {
-            Ok(metadata_json) => {
-                serde_json::from_str::<HashMap<String, u64>>(&metadata_json)
-                    .unwrap_or_else(|_| HashMap::new())
-            }
+            Ok(metadata_json) => serde_json::from_str::<HashMap<String, u64>>(&metadata_json)
+                .unwrap_or_else(|_| HashMap::new()),
             Err(_) => HashMap::new(),
         };
 
@@ -197,12 +198,8 @@ impl BlobManager {
     }
 
     /// Store a blob with retry logic and exponential backoff
-    pub async fn store_blob_with_retry(
-        &self,
-        cid: &str,
-        data: Vec<u8>,
-    ) -> Result<(), BlobError> {
-        console::info!(
+    pub async fn store_blob_with_retry(&self, cid: &str, data: Vec<u8>) -> Result<(), BlobError> {
+        console_info!(
             "[BlobManager] Storing blob {} ({} bytes)",
             cid,
             format!("{}", data.len())
@@ -211,7 +208,7 @@ impl BlobManager {
         // Check storage quota before storing
         let config = get_global_config();
         if self.current_usage_bytes + data.len() as u64 > config.storage.local_storage_limit {
-            console::error!("[BlobManager] Storage quota would be exceeded");
+            console_error!("[BlobManager] Storage quota would be exceeded");
             return Err(BlobError::StorageQuotaExceeded);
         }
 
@@ -226,17 +223,17 @@ impl BlobManager {
                 Ok(()) => {
                     // Note: For trait compatibility, we can't mutate self here
                     // The metadata will be updated when the mutable version is called
-                    
+
                     // Save updated metadata with the blob size
                     #[cfg(feature = "web")]
                     if let Err(e) = self.save_blob_metadata(cid, data.len() as u64) {
-                        console::warn!(
+                        console_warn!(
                             "[BlobManager] Failed to save metadata: {}",
                             format!("{}", e)
                         );
                     }
 
-                    console::info!(
+                    console_info!(
                         "[BlobManager] Successfully stored blob {} on attempt {}",
                         cid,
                         attempts
@@ -244,7 +241,7 @@ impl BlobManager {
                     return Ok(());
                 }
                 Err(e) => {
-                    console::warn!(
+                    console_warn!(
                         "[BlobManager] Attempt {} failed for blob {}: {}",
                         attempts,
                         cid,
@@ -255,7 +252,7 @@ impl BlobManager {
                     if attempts < config.retry.max_attempts {
                         // Exponential backoff delay
                         let delay_ms = BASE_RETRY_DELAY_MS * (2_u64.pow(attempts - 1));
-                        console::info!("[BlobManager] Retrying in {} ms", delay_ms);
+                        console_info!("{}", format!("[BlobManager] Retrying in {} ms", delay_ms));
 
                         // Simple delay for retry - in WASM this is typically not needed
                         // as operations are fast and non-blocking
@@ -275,7 +272,7 @@ impl BlobManager {
         }
 
         let error = last_error.unwrap_or_else(|| BlobError::Unknown("Unknown error".to_string()));
-        console::error!(
+        console_error!(
             "[BlobManager] Failed to store blob {} after {} attempts",
             cid,
             config.retry.max_attempts
@@ -307,7 +304,7 @@ impl BlobManager {
 
     /// Retrieve a blob from storage
     pub async fn get_blob(&self, cid: &str) -> Result<Vec<u8>, BlobError> {
-        console::info!("[BlobManager] Retrieving blob {}", cid);
+        console_info!("{}", format!("[BlobManager] Retrieving blob {}", cid));
 
         #[cfg(feature = "web")]
         {
@@ -319,7 +316,7 @@ impl BlobManager {
                         BlobError::SerializationError(format!("Failed to decode blob data: {}", e))
                     })?;
 
-                    console::info!(
+                    console_info!(
                         "[BlobManager] Retrieved blob {} ({} bytes)",
                         cid,
                         format!("{}", data.len())
@@ -358,14 +355,17 @@ impl BlobManager {
         Ok(StorageInfo {
             current_usage_bytes: self.current_usage_bytes,
             max_storage_bytes: config.storage.local_storage_limit,
-            available_bytes: config.storage.local_storage_limit.saturating_sub(self.current_usage_bytes),
+            available_bytes: config
+                .storage
+                .local_storage_limit
+                .saturating_sub(self.current_usage_bytes),
             blob_count: self.blob_count,
         })
     }
 
     /// Clean up all blobs after successful migration
     pub async fn cleanup_blobs(&mut self) -> Result<(), BlobError> {
-        console::info!("[BlobManager] Cleaning up all blobs after migration");
+        console_info!("[BlobManager] Cleaning up all blobs after migration");
 
         #[cfg(feature = "web")]
         {
@@ -373,12 +373,12 @@ impl BlobManager {
             for cid in self.blob_sizes.keys() {
                 let storage_key = format!("{}{}", BLOB_KEY_PREFIX, cid);
                 LocalStorage::delete(&storage_key);
-                console::info!("[BlobManager] Removed blob {}", cid);
+                console_info!("{}", format!("[BlobManager] Removed blob {}", cid));
             }
 
             // Remove metadata
             LocalStorage::delete(METADATA_KEY);
-            console::info!("[BlobManager] Removed metadata");
+            console_info!("[BlobManager] Removed metadata");
         }
 
         // Reset tracking
@@ -386,13 +386,13 @@ impl BlobManager {
         self.blob_count = 0;
         self.blob_sizes.clear();
 
-        console::info!("[BlobManager] Cleanup completed");
+        console_info!("[BlobManager] Cleanup completed");
         Ok(())
     }
 
     /// Remove a specific blob from storage
     pub async fn remove_blob(&mut self, cid: &str) -> Result<(), BlobError> {
-        console::info!("[BlobManager] Removing blob {}", cid);
+        console_info!("{}", format!("[BlobManager] Removing blob {}", cid));
 
         #[cfg(feature = "web")]
         {
@@ -408,14 +408,14 @@ impl BlobManager {
             // Save updated metadata
             #[cfg(feature = "web")]
             if let Err(e) = self.save_metadata() {
-                console::warn!(
+                console_warn!(
                     "[BlobManager] Failed to save metadata: {}",
                     format!("{}", e)
                 );
             }
         }
 
-        console::info!("[BlobManager] Removed blob {}", cid);
+        console_info!("{}", format!("[BlobManager] Removed blob {}", cid));
         Ok(())
     }
 
@@ -443,7 +443,10 @@ impl BlobManager {
     /// Get available storage bytes
     pub fn get_available_bytes(&self) -> u64 {
         let config = get_global_config();
-        config.storage.local_storage_limit.saturating_sub(self.current_usage_bytes)
+        config
+            .storage
+            .local_storage_limit
+            .saturating_sub(self.current_usage_bytes)
     }
 }
 
@@ -476,14 +479,19 @@ pub async fn check_storage_quota() -> Result<u64, BlobError> {
 /// Helper function to create a fallback blob manager (deprecated)
 /// This function is deprecated in favor of the new FallbackBlobManager
 /// which provides better integration and logging
-#[deprecated(since = "0.2.0", note = "Use crate::services::blob::blob_fallback_manager::create_fallback_blob_manager instead")]
-pub async fn create_blob_manager() -> Result<Box<dyn crate::services::blob::blob_manager_trait::BlobManagerTrait>, String> {
-    console::warn!("⚠️ [create_blob_manager] Using deprecated create_blob_manager - consider upgrading to FallbackBlobManager");
-    
+#[deprecated(
+    since = "0.2.0",
+    note = "Use crate::services::blob::blob_fallback_manager::create_fallback_blob_manager instead"
+)]
+pub async fn create_blob_manager(
+) -> Result<Box<dyn crate::services::blob::blob_manager_trait::BlobManagerTrait>, String> {
+    console_warn!("⚠️ [create_blob_manager] Using deprecated create_blob_manager - consider upgrading to FallbackBlobManager");
+
     use crate::services::blob::blob_fallback_manager::create_fallback_blob_manager;
-    
+
     match create_fallback_blob_manager().await {
-        Ok(manager) => Ok(Box::new(manager) as Box<dyn crate::services::blob::blob_manager_trait::BlobManagerTrait>),
+        Ok(manager) => Ok(Box::new(manager)
+            as Box<dyn crate::services::blob::blob_manager_trait::BlobManagerTrait>),
         Err(e) => Err(format!("{}", e)),
     }
 }
@@ -500,10 +508,13 @@ where
     let total_blobs = blobs.len() as u32;
     let total_bytes: u64 = blobs.iter().map(|(_, data)| data.len() as u64).sum();
 
-    console::info!(
-        "[store_blobs_with_progress] Storing {} blobs ({} bytes total)",
-        total_blobs,
-        format!("{}", total_bytes)
+    console_info!(
+        "{}",
+        format!(
+            "[store_blobs_with_progress] Storing {} blobs ({} bytes total)",
+            total_blobs,
+            total_bytes
+        )
     );
 
     let mut processed_bytes = 0;
@@ -536,6 +547,6 @@ where
         });
     }
 
-    console::info!("[store_blobs_with_progress] Completed storing all blobs");
+    console_info!("[store_blobs_with_progress] Completed storing all blobs");
     Ok(())
 }

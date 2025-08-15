@@ -1,17 +1,12 @@
 //! Strategy selector for choosing the optimal blob migration approach
 
-use gloo_console as console;
 use crate::services::{
-    client::ClientMissingBlob,
     blob::{blob_fallback_manager::FallbackBlobManager, blob_manager_trait::BlobManagerTrait},
+    client::ClientMissingBlob,
 };
+use crate::{console_debug, console_info};
 
-use super::{
-    MigrationStrategy, 
-    ConcurrentStrategy, 
-    StorageStrategy, 
-    StreamingStrategy
-};
+use super::{ConcurrentStrategy, MigrationStrategy, StorageStrategy, StreamingStrategy};
 
 /// Selector for choosing the optimal migration strategy
 pub struct StrategySelector;
@@ -25,80 +20,100 @@ impl StrategySelector {
     ) -> Box<dyn MigrationStrategy> {
         let blob_count = blobs.len() as u32;
         let backend_name = blob_manager.storage_name();
-        
-        console::info!("[StrategySelector] Selecting optimal strategy for {} blobs using {} backend", 
-                      blob_count, backend_name);
-        
+
+        console_info!(
+            "[StrategySelector] Selecting optimal strategy for {} blobs using {} backend",
+            blob_count,
+            backend_name
+        );
+
         // Get candidate strategies
         let strategies = Self::get_candidate_strategies(blob_count, backend_name);
-        
+
         // Score each strategy based on context
         let mut best_strategy: Option<Box<dyn MigrationStrategy>> = None;
         let mut best_score = 0u32;
-        
+
         for strategy in strategies {
-            let score = Self::score_strategy(&strategy, blob_count, backend_name, available_memory);
-            console::debug!("[StrategySelector] Strategy '{}' scored: {}", strategy.name(), score);
-            
+            let score = Self::score_strategy(strategy.as_ref(), blob_count, backend_name, available_memory);
+            console_debug!(
+                "[StrategySelector] Strategy '{}' scored: {}",
+                strategy.name(),
+                score
+            );
+
             if score > best_score {
                 best_score = score;
                 best_strategy = Some(strategy);
             }
         }
-        
+
         let selected = best_strategy.unwrap_or_else(|| Box::new(StreamingStrategy::new()));
-        console::info!("[StrategySelector] Selected strategy: '{}' (score: {})", selected.name(), best_score);
-        
+        console_info!(
+            "[StrategySelector] Selected strategy: '{}' (score: {})",
+            selected.name(),
+            best_score
+        );
+
         selected
     }
-    
+
     /// Get candidate strategies that can handle the given context
-    fn get_candidate_strategies(blob_count: u32, backend_name: &str) -> Vec<Box<dyn MigrationStrategy>> {
+    fn get_candidate_strategies(
+        blob_count: u32,
+        backend_name: &str,
+    ) -> Vec<Box<dyn MigrationStrategy>> {
         let mut candidates: Vec<Box<dyn MigrationStrategy>> = Vec::new();
-        
+
         // Concurrent strategy
         let concurrent = Box::new(ConcurrentStrategy::new());
-        if concurrent.supports_blob_count(blob_count) && concurrent.supports_storage_backend(backend_name) {
+        if concurrent.supports_blob_count(blob_count)
+            && concurrent.supports_storage_backend(backend_name)
+        {
             candidates.push(concurrent);
         }
-        
+
         // Storage strategy (with cache)
         let storage_cached = Box::new(StorageStrategy::new());
-        if storage_cached.supports_blob_count(blob_count) && storage_cached.supports_storage_backend(backend_name) {
+        if storage_cached.supports_blob_count(blob_count)
+            && storage_cached.supports_storage_backend(backend_name)
+        {
             candidates.push(storage_cached);
         }
-        
+
         // Storage strategy (without cache)
         let storage_direct = Box::new(StorageStrategy::with_cache(false));
-        if storage_direct.supports_blob_count(blob_count) && storage_direct.supports_storage_backend(backend_name) {
+        if storage_direct.supports_blob_count(blob_count)
+            && storage_direct.supports_storage_backend(backend_name)
+        {
             candidates.push(storage_direct);
         }
-        
+
         // Streaming strategy (always available as fallback)
         candidates.push(Box::new(StreamingStrategy::new()));
-        
+
         candidates
     }
-    
+
     /// Score a strategy based on the migration context
     fn score_strategy(
-        strategy: &Box<dyn MigrationStrategy>,
+        strategy: &dyn MigrationStrategy,
         blob_count: u32,
         backend_name: &str,
         available_memory: Option<u64>,
     ) -> u32 {
         let mut score = strategy.priority();
-        
+
         // Bonus for blob count suitability
         if strategy.supports_blob_count(blob_count) {
             score += 20;
         }
-        
+
         // Bonus for backend compatibility
         if strategy.supports_storage_backend(backend_name) {
             score += 15;
         }
-        
+
         // Memory usage considerations
         if let Some(available) = available_memory {
             let estimated_usage = strategy.estimate_memory_usage(blob_count);
@@ -109,7 +124,7 @@ impl StrategySelector {
                 score = score.saturating_sub(30);
             }
         }
-        
+
         // Specific strategy bonuses based on context
         match strategy.name() {
             "concurrent" => {
@@ -135,10 +150,10 @@ impl StrategySelector {
             }
             _ => {}
         }
-        
+
         score
     }
-    
+
     /// Get a fallback strategy that should always work
     pub fn get_fallback_strategy() -> Box<dyn MigrationStrategy> {
         Box::new(StreamingStrategy::new())

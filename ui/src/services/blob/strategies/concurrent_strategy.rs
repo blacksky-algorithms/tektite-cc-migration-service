@@ -3,15 +3,16 @@
 use async_trait::async_trait;
 use dioxus::prelude::*;
 use futures_util::{stream, StreamExt};
-use gloo_console as console;
-use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering}};
-use tokio::sync::{Semaphore, Mutex};
+// Import console macros from our crate
+use crate::{console_info, console_debug};
+use std::sync::{
+    atomic::{AtomicU32, AtomicU64, Ordering},
+    Arc,
+};
+use tokio::sync::{Mutex, Semaphore};
 
 #[cfg(target_arch = "wasm32")]
 use js_sys;
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Helper function to safely format u64 values for logging to avoid BigInt serialization issues
 fn format_bytes(bytes: u64) -> String {
@@ -23,42 +24,20 @@ fn format_number<T: std::fmt::Display>(value: T) -> String {
     value.to_string()
 }
 
+use crate::features::migration::types::{BlobProgress, MigrationAction};
 use crate::services::{
-    client::{ClientMissingBlob, ClientSessionCredentials, PdsClient},
     blob::blob_fallback_manager::FallbackBlobManager,
+    client::{ClientMissingBlob, ClientSessionCredentials, PdsClient},
     config::get_global_config,
     errors::MigrationResult,
 };
-use crate::features::migration::types::{MigrationAction, BlobProgress};
 
-use super::{MigrationStrategy, BlobMigrationResult, BlobFailure};
+use super::{BlobFailure, BlobMigrationResult, MigrationStrategy};
 
 /// Get current time in milliseconds since UNIX epoch (WASM compatible)
 #[cfg(target_arch = "wasm32")]
 fn current_time_millis() -> u64 {
     js_sys::Date::now() as u64
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn current_time_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-}
-
-/// Get current time in seconds since UNIX epoch (WASM compatible)
-#[cfg(target_arch = "wasm32")]
-fn current_time_secs() -> f64 {
-    js_sys::Date::now() / 1000.0
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn current_time_secs() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64()
 }
 
 /// Shared progress tracking for concurrent operations
@@ -89,8 +68,12 @@ impl ProgressTracker {
         if let Ok(mut current) = self.current_blob_cid.try_lock() {
             *current = Some(cid.clone());
         }
-        console::debug!("[ProgressTracker] Recorded completion: blob {} ({} bytes) - total processed: {}", 
-                       cid, format_bytes(bytes), format_number(new_count));
+        console_debug!(
+            "[ProgressTracker] Recorded completion: blob {} ({} bytes) - total processed: {}",
+            cid,
+            format_bytes(bytes),
+            format_number(new_count)
+        );
     }
 
     pub(crate) async fn should_update_progress(&self) -> bool {
@@ -98,17 +81,22 @@ impl ProgressTracker {
             let now = current_time_millis();
             let elapsed_millis = now.saturating_sub(*last_update);
             let processed = self.processed_blobs.load(Ordering::SeqCst);
-            
+
             // Update conditions:
             // - First blob completion (always show)
             // - Every 100ms for responsive UI updates
             // - Every 5th blob (ensure regular updates)
             // - Always update for first 10 blobs (important for early feedback)
-            if processed == 1 || 
-               elapsed_millis >= 100 || 
-               processed.is_multiple_of(5) ||
-               processed <= 10 {
-                console::debug!("[ProgressTracker] Triggering UI update: processed={}, elapsed={}ms", format_number(processed), format_number(elapsed_millis));
+            if processed == 1
+                || elapsed_millis >= 100
+                || processed.is_multiple_of(5)
+                || processed <= 10
+            {
+                console_debug!(
+                    "[ProgressTracker] Triggering UI update: processed={}, elapsed={}ms",
+                    format_number(processed),
+                    format_number(elapsed_millis)
+                );
                 *last_update = now;
                 return true;
             }
@@ -146,10 +134,10 @@ impl ProgressTracker {
     pub(crate) fn get_throughput_info(&self) -> (f64, Option<u64>) {
         let processed = self.processed_blobs.load(Ordering::SeqCst);
         let bytes = self.processed_bytes.load(Ordering::SeqCst);
-        
+
         let elapsed_millis = current_time_millis().saturating_sub(self.start_time_millis);
         let elapsed_secs = elapsed_millis as f64 / 1000.0;
-        
+
         if elapsed_secs > 0.0 {
             let blobs_per_sec = processed as f64 / elapsed_secs;
             let bytes_per_sec = bytes as f64 / elapsed_secs;
@@ -178,7 +166,7 @@ impl ConcurrentStrategy {
             max_concurrent: config.concurrency.max_concurrent_transfers,
         }
     }
-    
+
     pub fn with_concurrency(max_concurrent: usize) -> Self {
         Self { max_concurrent }
     }
@@ -194,9 +182,15 @@ impl MigrationStrategy for ConcurrentStrategy {
         _blob_manager: &mut FallbackBlobManager,
         dispatch: &EventHandler<MigrationAction>,
     ) -> MigrationResult<BlobMigrationResult> {
-        console::info!("[ConcurrentStrategy] Starting concurrent blob migration with {} blobs", blobs.len());
-        console::info!("[ConcurrentStrategy] Max concurrent transfers: {}", self.max_concurrent);
-        
+        console_info!(
+            "[ConcurrentStrategy] Starting concurrent blob migration with {} blobs",
+            blobs.len()
+        );
+        console_info!(
+            "[ConcurrentStrategy] Max concurrent transfers: {}",
+            self.max_concurrent
+        );
+
         let _pds_client = PdsClient::new();
         let semaphore = Arc::new(Semaphore::new(self.max_concurrent));
         let progress_tracker = Arc::new(ProgressTracker::new());
@@ -206,7 +200,7 @@ impl MigrationStrategy for ConcurrentStrategy {
 
         // Initial progress update
         dispatch.call(MigrationAction::SetMigrationStep(
-            "Starting concurrent blob migration...".to_string()
+            "Starting concurrent blob migration...".to_string(),
         ));
         dispatch.call(MigrationAction::SetBlobProgress(BlobProgress {
             total_blobs: blobs.len() as u32,
@@ -229,11 +223,11 @@ impl MigrationStrategy for ConcurrentStrategy {
                 let dispatch = *dispatch;
                 let blob = blob.clone();
                 let total_blobs = blobs.len() as u32;
-                
+
                 async move {
                     let _permit = semaphore.acquire().await.unwrap();
-                    
-                    console::info!("[ConcurrentStrategy] Processing blob {} ({}/{})", &blob.cid, index + 1, total_blobs);
+
+                    console_info!("{}", format!("[ConcurrentStrategy] Processing blob {} ({}/{})", &blob.cid, index + 1, total_blobs));
 
                     // Download blob from old PDS
                     let blob_data = match pds_client.export_blob(&old_session, blob.cid.clone()).await {
@@ -258,45 +252,41 @@ impl MigrationStrategy for ConcurrentStrategy {
                     };
 
                     let blob_size = blob_data.len() as u64;
-                    
+
                     // Upload blob to new PDS directly (bypass storage for concurrent strategy)
                     match pds_client.upload_blob(&new_session, blob.cid.clone(), blob_data).await {
                         Ok(response) => {
                             if response.success {
-                                console::info!("[ConcurrentStrategy] Successfully migrated blob {} ({} bytes)", &blob.cid, format_bytes(blob_size));
-                                
+                                console_info!("{}", format!("[ConcurrentStrategy] Successfully migrated blob {} ({} bytes)", &blob.cid, format_bytes(blob_size)));
                                 // Record completion and update progress if needed
                                 progress_tracker.record_blob_completion(blob.cid.clone(), blob_size);
-                                
+
                                 if progress_tracker.should_update_progress().await {
                                     let progress = progress_tracker.get_current_progress(total_blobs).await;
                                     let (blobs_per_sec, bytes_per_sec) = progress_tracker.get_throughput_info();
-                                    
-                                    console::info!("[ConcurrentStrategy] Dispatching UI progress update: {}/{} ({:.1}%)", 
-                                                 progress.processed_blobs, progress.total_blobs, 
-                                                 progress.current_blob_progress.unwrap_or(0.0));
-                                    
+                                    console_info!("{}", format!("[ConcurrentStrategy] Dispatching UI progress update: {}/{} ({:.1}%)", 
+                                                 progress.processed_blobs, progress.total_blobs,
+                                                 progress.current_blob_progress.unwrap_or(0.0)));
+
                                     // Generate informative progress message
                                     let progress_msg = if let Some(bps) = bytes_per_sec {
                                         format!("Migrating blobs: {}/{} ({:.1}%) - {:.1} blobs/sec, {:.1} MB/sec", 
-                                               progress.processed_blobs, 
+                                               progress.processed_blobs,
                                                progress.total_blobs,
                                                progress.current_blob_progress.unwrap_or(0.0),
                                                blobs_per_sec,
                                                bps as f64 / 1_048_576.0)
                                     } else {
                                         format!("Migrating blobs: {}/{} ({:.1}%)", 
-                                               progress.processed_blobs, 
+                                               progress.processed_blobs,
                                                progress.total_blobs,
                                                progress.current_blob_progress.unwrap_or(0.0))
                                     };
-                                    
                                     dispatch.call(MigrationAction::SetMigrationStep(progress_msg));
                                     dispatch.call(MigrationAction::SetBlobProgress(progress));
                                 } else {
-                                    console::debug!("[ConcurrentStrategy] Progress update skipped for blob {}", &blob.cid);
+                                    console_debug!("[ConcurrentStrategy] Progress update skipped for blob {}", &blob.cid);
                                 }
-                                
                                 Ok(Ok(blob_size))
                             } else {
                                 Ok::<Result<u64, BlobFailure>, String>(Err(BlobFailure {
@@ -332,36 +322,54 @@ impl MigrationStrategy for ConcurrentStrategy {
                 }
             }
         }
-        
+
         // Final progress update
-        let final_progress = progress_tracker.get_current_progress(blobs.len() as u32).await;
+        let final_progress = progress_tracker
+            .get_current_progress(blobs.len() as u32)
+            .await;
         let (blobs_per_sec, bytes_per_sec) = progress_tracker.get_throughput_info();
-        
-        console::info!("[ConcurrentStrategy] Final progress update: {}/{} ({:.1}%)", 
-                     final_progress.processed_blobs, final_progress.total_blobs, 
-                     final_progress.current_blob_progress.unwrap_or(0.0));
-        
+
+        console_info!(
+            "[ConcurrentStrategy] Final progress update: {}/{} ({:.1}%)",
+            final_progress.processed_blobs,
+            final_progress.total_blobs,
+            final_progress.current_blob_progress.unwrap_or(0.0)
+        );
+
         dispatch.call(MigrationAction::SetBlobProgress(final_progress));
-        
+
         // Final completion message with throughput stats
         let completion_msg = if let Some(bps) = bytes_per_sec {
-            format!("Completed blob migration: {}/{} uploaded - {:.1} blobs/sec, {:.1} MB/sec", 
-                   uploaded_count, 
-                   blobs.len(),
-                   blobs_per_sec,
-                   bps as f64 / 1_048_576.0)
+            format!(
+                "Completed blob migration: {}/{} uploaded - {:.1} blobs/sec, {:.1} MB/sec",
+                uploaded_count,
+                blobs.len(),
+                blobs_per_sec,
+                bps as f64 / 1_048_576.0
+            )
         } else {
-            format!("Completed blob migration: {}/{} uploaded", uploaded_count, blobs.len())
+            format!(
+                "Completed blob migration: {}/{} uploaded",
+                uploaded_count,
+                blobs.len()
+            )
         };
-        
+
         dispatch.call(MigrationAction::SetMigrationStep(completion_msg));
-        
-        console::info!("[ConcurrentStrategy] Completed concurrent migration: {}/{} uploaded, {} failed", 
-                      uploaded_count, blobs.len(), failed_blobs.len());
-        
+
+        console_info!(
+            "[ConcurrentStrategy] Completed concurrent migration: {}/{} uploaded, {} failed",
+            uploaded_count,
+            blobs.len(),
+            failed_blobs.len()
+        );
+
         if let Some(bps) = bytes_per_sec {
-            console::info!("[ConcurrentStrategy] Throughput: {:.1} blobs/sec, {:.1} MB/sec", 
-                          blobs_per_sec, bps as f64 / 1_048_576.0);
+            console_info!(
+                "[ConcurrentStrategy] Throughput: {:.1} blobs/sec, {:.1} MB/sec",
+                blobs_per_sec,
+                bps as f64 / 1_048_576.0
+            );
         }
 
         Ok(BlobMigrationResult {
@@ -372,23 +380,23 @@ impl MigrationStrategy for ConcurrentStrategy {
             strategy_used: self.name().to_string(),
         })
     }
-    
+
     fn name(&self) -> &'static str {
         "concurrent"
     }
-    
+
     fn supports_blob_count(&self, count: u32) -> bool {
         count >= 10 // Best for many blobs
     }
-    
+
     fn supports_storage_backend(&self, _backend: &str) -> bool {
         true // Works with any backend since it doesn't use storage
     }
-    
+
     fn priority(&self) -> u32 {
         80 // High priority for many blobs
     }
-    
+
     fn estimate_memory_usage(&self, _blob_count: u32) -> u64 {
         // Minimal memory usage since we don't store blobs
         1024 * 1024 // 1MB base overhead

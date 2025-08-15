@@ -2,16 +2,16 @@
 
 use async_trait::async_trait;
 use dioxus::prelude::*;
-use gloo_console as console;
+use crate::{console_debug, console_info};
 
+use crate::features::migration::types::MigrationAction;
 use crate::services::{
-    client::{ClientMissingBlob, ClientSessionCredentials, PdsClient},
     blob::blob_fallback_manager::FallbackBlobManager,
+    client::{ClientMissingBlob, ClientSessionCredentials, PdsClient},
     errors::MigrationResult,
 };
-use crate::features::migration::types::MigrationAction;
 
-use super::{MigrationStrategy, BlobMigrationResult, BlobFailure};
+use super::{BlobFailure, BlobMigrationResult, MigrationStrategy};
 
 /// Streaming strategy for direct PDS-to-PDS transfers with minimal memory usage
 pub struct StreamingStrategy {
@@ -30,7 +30,7 @@ impl StreamingStrategy {
             chunk_size: 1024 * 1024, // 1MB chunks
         }
     }
-    
+
     pub fn with_chunk_size(chunk_size: usize) -> Self {
         Self { chunk_size }
     }
@@ -46,9 +46,15 @@ impl MigrationStrategy for StreamingStrategy {
         _blob_manager: &mut FallbackBlobManager,
         dispatch: &EventHandler<MigrationAction>,
     ) -> MigrationResult<BlobMigrationResult> {
-        console::info!("[StreamingStrategy] Starting streaming blob migration with {} blobs", blobs.len());
-        console::info!("[StreamingStrategy] Using chunk size: {} bytes", self.chunk_size);
-        
+        console_info!(
+            "[StreamingStrategy] Starting streaming blob migration with {} blobs",
+            blobs.len()
+        );
+        console_info!(
+            "[StreamingStrategy] Using chunk size: {} bytes",
+            self.chunk_size
+        );
+
         let pds_client = PdsClient::new();
         let mut uploaded_count = 0u32;
         let mut failed_blobs = Vec::new();
@@ -60,26 +66,36 @@ impl MigrationStrategy for StreamingStrategy {
                 index + 1,
                 blobs.len()
             )));
-            
-            console::debug!("[StreamingStrategy] Streaming blob {}", &blob.cid);
-            
+
+            console_debug!("[StreamingStrategy] Streaming blob {}", &blob.cid);
+
             // For now, implement as a direct transfer since WASM streaming is complex
             // In a full implementation, this would use chunked transfers
-            match self.stream_blob_direct(&pds_client, &old_session, &new_session, &blob.cid).await {
+            match self
+                .stream_blob_direct(&pds_client, &old_session, &new_session, &blob.cid)
+                .await
+            {
                 Ok(bytes_transferred) => {
                     uploaded_count += 1;
                     total_bytes += bytes_transferred;
-                    console::debug!("[StreamingStrategy] Successfully streamed blob {} ({} bytes)", 
-                                  &blob.cid, bytes_transferred);
+                    console_debug!(
+                        "[StreamingStrategy] Successfully streamed blob {} ({} bytes)",
+                        &blob.cid,
+                        bytes_transferred
+                    );
                 }
                 Err(failure) => {
                     failed_blobs.push(failure);
                 }
             }
         }
-        
-        console::info!("[StreamingStrategy] Completed streaming migration: {}/{} uploaded, {} failed", 
-                      uploaded_count, blobs.len(), failed_blobs.len());
+
+        console_info!(
+            "[StreamingStrategy] Completed streaming migration: {}/{} uploaded, {} failed",
+            uploaded_count,
+            blobs.len(),
+            failed_blobs.len()
+        );
 
         Ok(BlobMigrationResult {
             total_blobs: blobs.len() as u32,
@@ -89,23 +105,23 @@ impl MigrationStrategy for StreamingStrategy {
             strategy_used: self.name().to_string(),
         })
     }
-    
+
     fn name(&self) -> &'static str {
         "streaming"
     }
-    
+
     fn supports_blob_count(&self, _count: u32) -> bool {
         true // Supports any number of blobs
     }
-    
+
     fn supports_storage_backend(&self, _backend: &str) -> bool {
         true // Doesn't use storage, works with any backend
     }
-    
+
     fn priority(&self) -> u32 {
         70 // High priority for memory efficiency
     }
-    
+
     fn estimate_memory_usage(&self, _blob_count: u32) -> u64 {
         // Minimal memory usage - only chunk size
         self.chunk_size as u64
@@ -142,11 +158,14 @@ impl StreamingStrategy {
                 });
             }
         };
-        
+
         let blob_size = blob_data.len() as u64;
-        
+
         // Upload blob data
-        match pds_client.upload_blob(new_session, cid.to_string(), blob_data).await {
+        match pds_client
+            .upload_blob(new_session, cid.to_string(), blob_data)
+            .await
+        {
             Ok(response) => {
                 if response.success {
                     Ok(blob_size)
@@ -158,13 +177,11 @@ impl StreamingStrategy {
                     })
                 }
             }
-            Err(e) => {
-                Err(BlobFailure {
-                    cid: cid.to_string(),
-                    operation: "stream_upload".to_string(),
-                    error: format!("Request failed: {}", e),
-                })
-            }
+            Err(e) => Err(BlobFailure {
+                cid: cid.to_string(),
+                operation: "stream_upload".to_string(),
+                error: format!("Request failed: {}", e),
+            }),
         }
     }
 }

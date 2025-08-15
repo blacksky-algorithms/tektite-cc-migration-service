@@ -2,16 +2,17 @@
 
 use async_trait::async_trait;
 use dioxus::prelude::*;
-use gloo_console as console;
+// Import console macros from our crate
+use crate::{console_info, console_warn, console_debug};
 
+use crate::features::migration::types::MigrationAction;
 use crate::services::{
-    client::{ClientMissingBlob, ClientSessionCredentials, PdsClient},
     blob::{blob_fallback_manager::FallbackBlobManager, blob_manager_trait::BlobManagerTrait},
+    client::{ClientMissingBlob, ClientSessionCredentials, PdsClient},
     errors::MigrationResult,
 };
-use crate::features::migration::types::MigrationAction;
 
-use super::{MigrationStrategy, BlobMigrationResult, BlobFailure};
+use super::{BlobFailure, BlobMigrationResult, MigrationStrategy};
 
 /// Storage-based strategy that caches blobs locally before upload
 pub struct StorageStrategy {
@@ -30,7 +31,7 @@ impl StorageStrategy {
             use_local_cache: true,
         }
     }
-    
+
     pub fn with_cache(use_local_cache: bool) -> Self {
         Self { use_local_cache }
     }
@@ -46,8 +47,14 @@ impl MigrationStrategy for StorageStrategy {
         blob_manager: &mut FallbackBlobManager,
         dispatch: &EventHandler<MigrationAction>,
     ) -> MigrationResult<BlobMigrationResult> {
-        console::info!("[StorageStrategy] Starting storage-based blob migration with {} blobs", blobs.len());
-        
+        console_info!(
+            "{}",
+            format!(
+                "[StorageStrategy] Starting storage-based blob migration with {} blobs",
+                blobs.len()
+            )
+        );
+
         let pds_client = PdsClient::new();
         let mut uploaded_count = 0u32;
         let mut failed_blobs = Vec::new();
@@ -55,11 +62,17 @@ impl MigrationStrategy for StorageStrategy {
         let backend_name = blob_manager.storage_name();
 
         // Phase 1: Download and store blobs
-        console::info!("[StorageStrategy] Phase 1: Downloading and caching {} blobs to {}", 
-                      blobs.len(), backend_name);
-        
+        console_info!(
+            "{}",
+            format!(
+                "[StorageStrategy] Phase 1: Downloading and caching {} blobs to {}",
+                blobs.len(),
+                backend_name
+            )
+        );
+
         let mut cached_blobs = Vec::new();
-        
+
         for (index, blob) in blobs.iter().enumerate() {
             dispatch.call(MigrationAction::SetMigrationStep(format!(
                 "Caching blob {} of {} to {} storage...",
@@ -67,7 +80,7 @@ impl MigrationStrategy for StorageStrategy {
                 blobs.len(),
                 backend_name
             )));
-            
+
             // Download blob from old PDS
             match pds_client.export_blob(&old_session, blob.cid.clone()).await {
                 Ok(response) => {
@@ -75,17 +88,31 @@ impl MigrationStrategy for StorageStrategy {
                         let blob_data = response.blob_data.unwrap_or_default();
                         let blob_size = blob_data.len() as u64;
                         total_bytes += blob_size;
-                        
+
                         if self.use_local_cache {
                             // Store in local cache with retry logic
-                            match blob_manager.store_blob_with_retry(&blob.cid, blob_data.clone()).await {
+                            match blob_manager
+                                .store_blob_with_retry(&blob.cid, blob_data.clone())
+                                .await
+                            {
                                 Ok(()) => {
-                                    console::debug!("[StorageStrategy] Cached blob {} ({} bytes) in {}", 
-                                                  &blob.cid, blob_size, backend_name);
+                                    console_debug!(
+                                        "{}",
+                                        format!(
+                                            "[StorageStrategy] Cached blob {} ({} bytes) in {}",
+                                            &blob.cid,
+                                            blob_size,
+                                            backend_name
+                                        )
+                                    );
                                     cached_blobs.push((blob.cid.clone(), blob_data));
                                 }
                                 Err(e) => {
-                                    console::warn!("[StorageStrategy] Failed to cache blob {}: {}", &blob.cid, &e.to_string());
+                                    console_warn!(
+                                        "[StorageStrategy] Failed to cache blob {}: {}",
+                                        &blob.cid,
+                                        &e.to_string()
+                                    );
                                     failed_blobs.push(BlobFailure {
                                         cid: blob.cid.clone(),
                                         operation: "cache".to_string(),
@@ -114,10 +141,16 @@ impl MigrationStrategy for StorageStrategy {
                 }
             }
         }
-        
+
         // Phase 2: Upload blobs from cache to new PDS
-        console::info!("[StorageStrategy] Phase 2: Uploading {} cached blobs to new PDS", cached_blobs.len());
-        
+        console_info!(
+            "{}",
+            format!(
+                "[StorageStrategy] Phase 2: Uploading {} cached blobs to new PDS",
+                cached_blobs.len()
+            )
+        );
+
         for (index, (cid, blob_data)) in cached_blobs.iter().enumerate() {
             dispatch.call(MigrationAction::SetMigrationStep(format!(
                 "Uploading blob {} of {} from {} storage...",
@@ -125,12 +158,22 @@ impl MigrationStrategy for StorageStrategy {
                 cached_blobs.len(),
                 backend_name
             )));
-            
-            match pds_client.upload_blob(&new_session, cid.clone(), blob_data.clone()).await {
+
+            match pds_client
+                .upload_blob(&new_session, cid.clone(), blob_data.clone())
+                .await
+            {
                 Ok(response) => {
                     if response.success {
                         uploaded_count += 1;
-                        console::debug!("[StorageStrategy] Uploaded blob {} from {} storage", cid, backend_name);
+                        console_debug!(
+                            "{}",
+                            format!(
+                                "[StorageStrategy] Uploaded blob {} from {} storage",
+                                cid,
+                                backend_name
+                            )
+                        );
                     } else {
                         failed_blobs.push(BlobFailure {
                             cid: cid.clone(),
@@ -148,17 +191,33 @@ impl MigrationStrategy for StorageStrategy {
                 }
             }
         }
-        
+
         // Phase 3: Cleanup cached blobs if using local cache
         if self.use_local_cache {
-            console::info!("[StorageStrategy] Phase 3: Cleaning up {} cached blobs", cached_blobs.len());
+            console_info!(
+                "{}",
+                format!(
+                    "[StorageStrategy] Phase 3: Cleaning up {} cached blobs",
+                    cached_blobs.len()
+                )
+            );
             if let Err(e) = blob_manager.cleanup_blobs().await {
-                console::warn!("[StorageStrategy] Failed to cleanup cached blobs: {}", &e.to_string());
+                console_warn!(
+                    "[StorageStrategy] Failed to cleanup cached blobs: {}",
+                    &e.to_string()
+                );
             }
         }
-        
-        console::info!("[StorageStrategy] Completed storage-based migration: {}/{} uploaded, {} failed", 
-                      uploaded_count, blobs.len(), failed_blobs.len());
+
+        console_info!(
+            "{}",
+            format!(
+                "[StorageStrategy] Completed storage-based migration: {}/{} uploaded, {} failed",
+                uploaded_count,
+                blobs.len(),
+                failed_blobs.len()
+            )
+        );
 
         Ok(BlobMigrationResult {
             total_blobs: blobs.len() as u32,
@@ -168,24 +227,24 @@ impl MigrationStrategy for StorageStrategy {
             strategy_used: self.name().to_string(),
         })
     }
-    
+
     fn name(&self) -> &'static str {
         "storage"
     }
-    
+
     fn supports_blob_count(&self, count: u32) -> bool {
         count <= 50 // Best for moderate number of blobs
     }
-    
+
     fn supports_storage_backend(&self, backend: &str) -> bool {
         // Supports all backends except when caching is disabled
         self.use_local_cache || backend == "none"
     }
-    
+
     fn priority(&self) -> u32 {
         60 // Medium priority
     }
-    
+
     fn estimate_memory_usage(&self, blob_count: u32) -> u64 {
         if self.use_local_cache {
             // Estimate based on average blob size (assume 1MB per blob)

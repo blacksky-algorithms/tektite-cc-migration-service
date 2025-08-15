@@ -1,13 +1,14 @@
 // use api::{export_blob, upload_blob, MissingBlob, SessionCredentials};
-use crate::services::config::get_global_config;
-use dioxus::prelude::*;
-use gloo_console as console;
-use crate::services::client::{ClientMissingBlob, ClientSessionCredentials};
+use crate::features::migration::*;
 use crate::services::blob::blob_fallback_manager::FallbackBlobManager;
 use crate::services::blob::blob_manager_trait::BlobManagerTrait;
-use crate::services::blob::strategies::{StrategySelector, BlobMigrationResult, BlobFailure};
-use crate::features::migration::*;
+use crate::services::blob::strategies::{BlobFailure, BlobMigrationResult, StrategySelector};
 use crate::services::client::PdsClient;
+use crate::services::client::{ClientMissingBlob, ClientSessionCredentials};
+use crate::services::config::get_global_config;
+use dioxus::prelude::*;
+// Import console macros from our crate
+use crate::{console_error, console_info, console_warn, console_debug};
 
 // Enhanced imports for streaming and concurrent operations
 use futures_util::{stream, StreamExt};
@@ -23,7 +24,7 @@ use tokio::sync::Semaphore;
 const LARGE_BLOB_THRESHOLD: u64 = 5 * 1024 * 1024;
 
 /// Smart blob migration using automatic strategy selection
-/// 
+///
 /// Automatically chooses optimal migration approach based on:
 /// - Blob count and estimated size
 /// - Available storage capacity  
@@ -35,30 +36,52 @@ pub async fn smart_blob_migration(
     blob_manager: &mut FallbackBlobManager,
     dispatch: &EventHandler<MigrationAction>,
 ) -> Result<BlobMigrationResult, String> {
-    console::info!("[SmartBlobMigration] Starting smart blob migration with {} blobs", missing_blobs.len().to_string());
-    
+    console_info!(
+        "{}",
+        format!(
+            "[SmartBlobMigration] Starting smart blob migration with {} blobs",
+            missing_blobs.len().to_string()
+        )
+    );
+
     // Get available memory estimate (in WASM this is challenging, so we use a conservative estimate)
     let available_memory = Some(100 * 1024 * 1024); // 100MB conservative estimate
-    
+
     // Select optimal strategy
-    let strategy = StrategySelector::select_strategy(&missing_blobs, blob_manager, available_memory);
-    
-    console::info!("[SmartBlobMigration] Using '{}' strategy for migration", strategy.name());
-    
+    let strategy =
+        StrategySelector::select_strategy(&missing_blobs, blob_manager, available_memory);
+
+    console_info!(
+        "{}",
+        format!(
+            "[SmartBlobMigration] Using '{}' strategy for migration",
+            strategy.name()
+        )
+    );
+
     // Execute the migration using the selected strategy
-    match strategy.migrate(
-        missing_blobs,
-        old_session,
-        new_session,
-        blob_manager,
-        dispatch,
-    ).await {
+    match strategy
+        .migrate(
+            missing_blobs,
+            old_session,
+            new_session,
+            blob_manager,
+            dispatch,
+        )
+        .await
+    {
         Ok(result) => {
-            console::info!("[SmartBlobMigration] Migration completed successfully with '{}' strategy", &result.strategy_used);
+            console_info!(
+                "{}",
+                format!(
+                    "[SmartBlobMigration] Migration completed successfully with '{}' strategy",
+                    &result.strategy_used
+                )
+            );
             Ok(result)
         }
         Err(e) => {
-            console::error!("[SmartBlobMigration] Migration failed: {}", &e.to_string());
+            console_error!("{}", format!("[SmartBlobMigration] Migration failed: {}", &e.to_string()));
             Err(format!("Smart migration failed: {}", e))
         }
     }
@@ -77,9 +100,12 @@ pub async fn migrate_blobs_with_progress(
     let mut total_blob_bytes = 0u64;
     let mut failed_blobs = Vec::new();
 
-    console::info!(
-        "[BlobMigration] Starting migration of {} blobs",
-        total_blobs
+    console_info!(
+        "{}",
+        format!(
+            "[BlobMigration] Starting migration of {} blobs",
+            total_blobs
+        )
     );
 
     // Phase 1: Download and cache blobs
@@ -104,10 +130,13 @@ pub async fn migrate_blobs_with_progress(
             Ok((blob_data, blob_size)) => {
                 total_blob_bytes += blob_size;
                 downloaded_blobs.push((missing_blob.cid.clone(), blob_data));
-                console::info!(
-                    "[BlobMigration] Downloaded blob {} ({} bytes)",
-                    &missing_blob.cid,
-                    blob_size
+                console_info!(
+                    "{}",
+                    format!(
+                        "[BlobMigration] Downloaded blob {} ({} bytes)",
+                        &missing_blob.cid,
+                        blob_size
+                    )
                 );
 
                 // Update progress to 100% for this blob
@@ -121,10 +150,13 @@ pub async fn migrate_blobs_with_progress(
                 );
             }
             Err(error) => {
-                console::error!(
-                    "[BlobMigration] Failed to download blob {}: {}",
-                    &missing_blob.cid,
-                    &error
+                console_error!(
+                    "{}",
+                    format!(
+                        "[BlobMigration] Failed to download blob {}: {}",
+                        &missing_blob.cid,
+                        &error
+                    )
                 );
                 failed_blobs.push(BlobFailure {
                     cid: missing_blob.cid.clone(),
@@ -137,10 +169,13 @@ pub async fn migrate_blobs_with_progress(
         }
     }
 
-    console::info!(
-        "[BlobMigration] Downloaded {} blobs successfully, {} failed",
-        downloaded_blobs.len(),
-        failed_blobs.len()
+    console_info!(
+        "{}",
+        format!(
+            "[BlobMigration] Downloaded {} blobs successfully, {} failed",
+            downloaded_blobs.len(),
+            failed_blobs.len()
+        )
     );
 
     // Phase 2: Upload blobs to new PDS
@@ -156,10 +191,10 @@ pub async fn migrate_blobs_with_progress(
         match upload_blob_to_pds(cid, blob_data, &new_session).await {
             Ok(()) => {
                 uploaded_count += 1;
-                console::info!("[BlobMigration] Uploaded blob {} to new PDS", cid);
+                console_info!("{}", format!("[BlobMigration] Uploaded blob {} to new PDS", cid));
             }
             Err(error) => {
-                console::error!("[BlobMigration] Failed to upload blob {}: {}", cid, &error);
+                console_error!("{}", format!("[BlobMigration] Failed to upload blob {}: {}", cid, &error));
                 failed_blobs.push(BlobFailure {
                     cid: cid.to_string(),
                     operation: "upload".to_string(),
@@ -169,9 +204,12 @@ pub async fn migrate_blobs_with_progress(
         }
     }
 
-    console::info!(
-        "[BlobMigration] Uploaded {} blobs successfully",
-        uploaded_count
+    console_info!(
+        "{}",
+        format!(
+            "[BlobMigration] Uploaded {} blobs successfully",
+            uploaded_count
+        )
     );
 
     Ok(BlobMigrationResult {
@@ -191,7 +229,10 @@ async fn download_and_cache_blob(
 ) -> Result<(Vec<u8>, u64), String> {
     let pds_client = PdsClient::new();
     // Download from old PDS
-    let blob_data = match pds_client.export_blob(&old_session.clone(), cid.to_string()).await {
+    let blob_data = match pds_client
+        .export_blob(&old_session.clone(), cid.to_string())
+        .await
+    {
         Ok(response) => {
             if response.success {
                 response.blob_data.unwrap_or_default()
@@ -212,11 +253,16 @@ async fn download_and_cache_blob(
         Ok(()) => Ok((blob_data, blob_size)),
         Err(error) => {
             // Try to free up space and retry once if quota exceeded
-            if matches!(error, crate::services::blob::blob_manager_trait::BlobManagerError::QuotaExceeded(_)) {
-                console::warn!("[BlobMigration] Storage quota exceeded, attempting cleanup...");
+            if matches!(
+                error,
+                crate::services::blob::blob_manager_trait::BlobManagerError::QuotaExceeded(_)
+            ) {
+                console_warn!("[BlobMigration] Storage quota exceeded, attempting cleanup...");
                 match blob_manager.cleanup_blobs().await {
                     Ok(()) => {
-                        console::info!("[BlobMigration] Cleanup successful, retrying blob storage...");
+                        console_info!(
+                            "[BlobMigration] Cleanup successful, retrying blob storage..."
+                        );
                         match blob_manager
                             .store_blob_with_retry(cid, blob_data.clone())
                             .await
@@ -225,9 +271,10 @@ async fn download_and_cache_blob(
                             Err(e) => Err(format!("Failed to cache blob after cleanup: {}", e)),
                         }
                     }
-                    Err(cleanup_err) => {
-                        Err(format!("Failed to cleanup storage and cache blob: {} (cleanup error: {})", error, cleanup_err))
-                    }
+                    Err(cleanup_err) => Err(format!(
+                        "Failed to cleanup storage and cache blob: {} (cleanup error: {})",
+                        error, cleanup_err
+                    )),
                 }
             } else {
                 Err(format!("Failed to cache blob: {}", error))
@@ -243,7 +290,10 @@ async fn upload_blob_to_pds(
     new_session: &ClientSessionCredentials,
 ) -> Result<(), String> {
     let pds_client = PdsClient::new();
-    match pds_client.upload_blob(&new_session.clone(), cid.to_string(), blob_data.to_vec()).await {
+    match pds_client
+        .upload_blob(&new_session.clone(), cid.to_string(), blob_data.to_vec())
+        .await
+    {
         Ok(response) => {
             if response.success {
                 Ok(())
@@ -260,12 +310,15 @@ async fn upload_blob_to_pds(
 pub async fn migrate_blob_direct(
     client: &Client,
     old_session: &ClientSessionCredentials,
-    new_session: &ClientSessionCredentials, 
+    new_session: &ClientSessionCredentials,
     cid: &str,
 ) -> Result<(), String> {
-    console::info!(
-        "[DirectMigration] 📦 Starting direct blob migration for {}",
-        cid
+    console_info!(
+        "{}",
+        format!(
+            "[DirectMigration] 📦 Starting direct blob migration for {}",
+            cid
+        )
     );
 
     let config = get_global_config();
@@ -273,12 +326,15 @@ pub async fn migrate_blob_direct(
 
     while attempts < config.retry.migration_retries {
         attempts += 1;
-        console::debug!("[DirectMigration] Attempt {} for blob {}", attempts, cid);
+        console_debug!(
+            "{}",
+            format!("[DirectMigration] Attempt {} for blob {}", attempts, cid)
+        );
 
         // Download blob data from old PDS
-        console::debug!("[DirectMigration] 📥 Downloading blob from old PDS...");
+        console_debug!("[DirectMigration] 📥 Downloading blob from old PDS...");
         let download_url = format!("{}/xrpc/com.atproto.sync.getBlob", old_session.pds);
-        
+
         let blob_data = match client
             .get(&download_url)
             .bearer_auth(&old_session.access_jwt)
@@ -290,11 +346,18 @@ pub async fn migrate_blob_direct(
                 if response.status().is_success() {
                     match response.bytes().await {
                         Ok(bytes) => {
-                            console::debug!("[DirectMigration] ✅ Downloaded {} bytes for blob {}", bytes.len(), cid);
+                            console_debug!(
+                                "{}",
+                                format!(
+                                    "[DirectMigration] ✅ Downloaded {} bytes for blob {}",
+                                    bytes.len(),
+                                    cid
+                                )
+                            );
                             bytes.to_vec()
                         }
                         Err(e) => {
-                            console::warn!("[DirectMigration] ⚠️ Failed to read response bytes on attempt {}: {}", attempts, e.to_string());
+                            console_warn!("{}", format!("[DirectMigration] ⚠️ Failed to read response bytes on attempt {}: {}", attempts, e.to_string()));
                             if attempts >= config.retry.migration_retries {
                                 return Err(format!("Failed to read response bytes: {}", e));
                             }
@@ -303,7 +366,14 @@ pub async fn migrate_blob_direct(
                     }
                 } else {
                     let error = format!("Download failed with status: {}", response.status());
-                    console::warn!("[DirectMigration] ⚠️ Download failed on attempt {}: {}", attempts, &error);
+                    console_warn!(
+                        "{}",
+                        format!(
+                            "[DirectMigration] ⚠️ Download failed on attempt {}: {}",
+                            attempts,
+                            &error
+                        )
+                    );
                     if attempts >= config.retry.migration_retries {
                         return Err(error);
                     }
@@ -311,7 +381,14 @@ pub async fn migrate_blob_direct(
                 }
             }
             Err(e) => {
-                console::warn!("[DirectMigration] ⚠️ Download request failed on attempt {}: {}", attempts, e.to_string());
+                console_warn!(
+                    "{}",
+                    format!(
+                        "[DirectMigration] ⚠️ Download request failed on attempt {}: {}",
+                        attempts,
+                        e.to_string()
+                    )
+                );
                 if attempts >= config.retry.migration_retries {
                     return Err(format!("Download request failed: {}", e));
                 }
@@ -320,9 +397,9 @@ pub async fn migrate_blob_direct(
         };
 
         // Upload blob data to new PDS
-        console::debug!("[DirectMigration] 📤 Uploading blob to new PDS...");
+        console_debug!("[DirectMigration] 📤 Uploading blob to new PDS...");
         let upload_url = format!("{}/xrpc/com.atproto.repo.uploadBlob", new_session.pds);
-        
+
         match client
             .post(&upload_url)
             .bearer_auth(&new_session.access_jwt)
@@ -333,18 +410,39 @@ pub async fn migrate_blob_direct(
         {
             Ok(response) => {
                 if response.status().is_success() {
-                    console::info!("[DirectMigration] ✅ Successfully migrated blob {} on attempt {}", cid, attempts);
+                    console_info!(
+                        "{}",
+                        format!(
+                            "[DirectMigration] ✅ Successfully migrated blob {} on attempt {}",
+                            cid,
+                            attempts
+                        )
+                    );
                     return Ok(());
                 } else {
                     let error = format!("Upload failed with status: {}", response.status());
-                    console::warn!("[DirectMigration] ⚠️ Upload failed on attempt {}: {}", attempts, &error);
+                    console_warn!(
+                        "{}",
+                        format!(
+                            "[DirectMigration] ⚠️ Upload failed on attempt {}: {}",
+                            attempts,
+                            &error
+                        )
+                    );
                     if attempts >= config.retry.migration_retries {
                         return Err(error);
                     }
                 }
             }
             Err(e) => {
-                console::warn!("[DirectMigration] ⚠️ Upload request failed on attempt {}: {}", attempts, e.to_string());
+                console_warn!(
+                    "{}",
+                    format!(
+                        "[DirectMigration] ⚠️ Upload request failed on attempt {}: {}",
+                        attempts,
+                        e.to_string()
+                    )
+                );
                 if attempts >= config.retry.migration_retries {
                     return Err(format!("Upload request failed: {}", e));
                 }
@@ -353,11 +451,17 @@ pub async fn migrate_blob_direct(
 
         // Brief delay before retry (not implemented in WASM, but logged)
         if attempts < config.retry.migration_retries {
-            console::debug!("[DirectMigration] 🔄 Retrying blob {} migration...", cid);
+            console_debug!(
+                "{}",
+                format!("[DirectMigration] 🔄 Retrying blob {} migration...", cid)
+            );
         }
     }
 
-    Err(format!("Failed to migrate blob {} after {} attempts", cid, config.retry.migration_retries))
+    Err(format!(
+        "Failed to migrate blob {} after {} attempts",
+        cid, config.retry.migration_retries
+    ))
 }
 
 /// Concurrent blob migration using streaming with adaptive concurrency limits
@@ -370,16 +474,19 @@ pub async fn migrate_blobs_concurrent_adaptive(
     max_concurrent: usize,
 ) -> Result<BlobMigrationResult, String> {
     let total_blobs = missing_blobs.len();
-    console::info!(
-        "[ConcurrentMigration] 🚀 Starting concurrent migration of {} blobs with max {} concurrent transfers (adaptive)",
-        total_blobs,
-        max_concurrent
+    console_info!(
+        "{}",
+        format!(
+            "[ConcurrentMigration] 🚀 Starting concurrent migration of {} blobs with max {} concurrent transfers (adaptive)",
+            total_blobs,
+            max_concurrent
+        )
     );
 
     // Create shared client and semaphore for adaptive concurrency control
     let client = Arc::new(Client::new());
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
-    
+
     let mut successful_transfers = 0u32;
     let mut failed_blobs = Vec::new();
     let total_bytes = 0u64;
@@ -390,13 +497,19 @@ pub async fn migrate_blobs_concurrent_adaptive(
     )));
 
     // Process all blobs with streaming (concurrent)
-    console::info!("[ConcurrentMigration] 🌊 Processing {} blobs with concurrent streaming...", total_blobs);
+    console_info!(
+        "{}",
+        format!(
+            "[ConcurrentMigration] 🌊 Processing {} blobs with concurrent streaming...",
+            total_blobs
+        )
+    );
     let stream_results = stream::iter(missing_blobs.into_iter().map(|blob| {
         let client = client.clone();
         let semaphore = semaphore.clone();
         let old_session = old_session.clone();
         let new_session = new_session.clone();
-        
+
         migrate_single_blob_streaming(client, semaphore, blob, old_session, new_session)
     }))
     .buffer_unordered(max_concurrent)
@@ -408,10 +521,23 @@ pub async fn migrate_blobs_concurrent_adaptive(
         match result {
             Ok(cid) => {
                 successful_transfers += 1;
-                console::info!("[ConcurrentMigration] ✅ Streamed blob {} successfully", cid);
+                console_info!(
+                    "{}",
+                    format!(
+                        "[ConcurrentMigration] ✅ Streamed blob {} successfully",
+                        cid
+                    )
+                );
             }
             Err(failure) => {
-                console::error!("[ConcurrentMigration] ❌ Streaming failed for {}: {}", &failure.cid, &failure.error);
+                console_error!(
+                    "{}",
+                    format!(
+                        "[ConcurrentMigration] ❌ Streaming failed for {}: {}",
+                        &failure.cid,
+                        &failure.error
+                    )
+                );
                 failed_blobs.push(failure);
             }
         }
@@ -425,17 +551,20 @@ pub async fn migrate_blobs_concurrent_adaptive(
         strategy_used: "concurrent".to_string(),
     };
 
-    console::info!(
-        "[ConcurrentMigration] 🏁 Concurrent migration completed: {}/{} successful, {} failed",
-        successful_transfers,
-        total_blobs,
-        result.failed_blobs.len()
+    console_info!(
+        "{}",
+        format!(
+            "[ConcurrentMigration] 🏁 Concurrent migration completed: {}/{} successful, {} failed",
+            successful_transfers,
+            total_blobs,
+            result.failed_blobs.len()
+        )
     );
 
     Ok(result)
 }
 
-/// Migrate a single blob using streaming 
+/// Migrate a single blob using streaming
 async fn migrate_single_blob_streaming(
     client: Arc<Client>,
     semaphore: Arc<Semaphore>,
@@ -450,18 +579,24 @@ async fn migrate_single_blob_streaming(
     })?;
 
     let cid = missing_blob.cid.clone();
-    console::debug!("[StreamMigration] 🎫 Acquired permit for blob {}", &cid);
+    console_debug!(
+        "{}",
+        format!("[StreamMigration] 🎫 Acquired permit for blob {}", &cid)
+    );
 
     match migrate_blob_direct(&client, &old_session, &new_session, &cid).await {
         Ok(()) => {
-            console::debug!("[StreamMigration] 🎫 Releasing permit for blob {}", &cid);
+            console_debug!(
+                "{}",
+                format!("[StreamMigration] 🎫 Releasing permit for blob {}", &cid)
+            );
             Ok(cid)
         }
         Err(e) => Err(BlobFailure {
             cid,
             operation: "stream_transfer".to_string(),
             error: e,
-        })
+        }),
     }
 }
 
@@ -474,7 +609,13 @@ async fn migrate_single_blob_with_storage(
     new_session: ClientSessionCredentials,
 ) -> Result<(u64, String, Vec<u8>), BlobFailure> {
     let cid = missing_blob.cid.clone(); // Clone before borrowing in console log
-    console::debug!("[StorageMigration] 💾 Processing blob {} with storage", &cid);
+    console_debug!(
+        "{}",
+        format!(
+            "[StorageMigration] 💾 Processing blob {} with storage",
+            &cid
+        )
+    );
 
     // Download blob data
     let pds_client = PdsClient::new();
@@ -485,7 +626,7 @@ async fn migrate_single_blob_with_storage(
             } else {
                 return Err(BlobFailure {
                     cid: cid.clone(),
-                    operation: "download".to_string(), 
+                    operation: "download".to_string(),
                     error: response.message,
                 });
             }
@@ -500,7 +641,10 @@ async fn migrate_single_blob_with_storage(
     };
 
     // Upload to new PDS
-    match pds_client.upload_blob(&new_session, cid.clone(), blob_data.clone()).await {
+    match pds_client
+        .upload_blob(&new_session, cid.clone(), blob_data.clone())
+        .await
+    {
         Ok(response) => {
             if response.success {
                 Ok((blob_data.len() as u64, cid, blob_data))
@@ -516,7 +660,7 @@ async fn migrate_single_blob_with_storage(
             cid: cid.clone(),
             operation: "upload".to_string(),
             error: format!("Upload blob API call failed: {}", e),
-        })
+        }),
     }
 }
 

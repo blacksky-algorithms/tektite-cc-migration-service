@@ -4,11 +4,11 @@
 //! real-time usage tracking, capacity prediction, performance metrics, and
 //! intelligent recommendations for blob migration optimization.
 
-use gloo_console as console;
+use crate::services::blob::blob_fallback_manager::FallbackBlobManager;
+use crate::services::blob::blob_manager_trait::{BlobManagerError, BlobManagerTrait};
+use crate::{console_debug, console_info, console_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::services::blob::blob_manager_trait::{BlobManagerTrait, BlobManagerError};
-use crate::services::blob::blob_fallback_manager::FallbackBlobManager;
 
 /// Real-time storage metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,9 +104,15 @@ impl StorageMonitor {
     }
 
     /// Record current storage metrics for a backend
-    pub async fn record_metrics(&mut self, blob_manager: &FallbackBlobManager) -> Result<StorageMetrics, BlobManagerError> {
+    pub async fn record_metrics(
+        &mut self,
+        blob_manager: &FallbackBlobManager,
+    ) -> Result<StorageMetrics, BlobManagerError> {
         let (backend_name, _) = blob_manager.get_active_backend_info();
-        console::debug!("📊 [StorageMonitor] Recording metrics for {} backend", backend_name);
+        console_debug!("{}", format!(
+            "📊 [StorageMonitor] Recording metrics for {} backend",
+            backend_name
+        ));
 
         let current_usage = blob_manager.get_storage_usage().await.unwrap_or(0);
         let total_capacity = blob_manager.estimate_storage_capacity().await.unwrap_or(0);
@@ -125,8 +131,13 @@ impl StorageMonitor {
         let timestamp = js_sys::Date::now() as u64;
 
         // Get existing trend data for this backend
-        let existing_metrics = self.metrics_history.get(backend_name).and_then(|history| history.last());
-        let mut trend_data = existing_metrics.map(|m| m.trend_data.clone()).unwrap_or_default();
+        let existing_metrics = self
+            .metrics_history
+            .get(backend_name)
+            .and_then(|history| history.last());
+        let mut trend_data = existing_metrics
+            .map(|m| m.trend_data.clone())
+            .unwrap_or_default();
 
         // Add new data point
         trend_data.push(UsageDataPoint {
@@ -138,7 +149,12 @@ impl StorageMonitor {
 
         // Keep only recent data points
         if trend_data.len() > self.max_history_points {
-            trend_data = trend_data.into_iter().rev().take(self.max_history_points).rev().collect();
+            trend_data = trend_data
+                .into_iter()
+                .rev()
+                .take(self.max_history_points)
+                .rev()
+                .collect();
         }
 
         let metrics = StorageMetrics {
@@ -147,14 +163,17 @@ impl StorageMonitor {
             total_capacity_bytes: total_capacity,
             available_bytes,
             usage_percentage,
-            blob_count: 0, // Would need to track this
+            blob_count: 0,        // Would need to track this
             average_blob_size: 0, // Would need to calculate this
             last_updated: timestamp,
             trend_data,
         };
 
         // Store in history
-        let history = self.metrics_history.entry(backend_name.to_string()).or_default();
+        let history = self
+            .metrics_history
+            .entry(backend_name.to_string())
+            .or_default();
         history.push(metrics.clone());
 
         // Keep history size manageable
@@ -162,23 +181,36 @@ impl StorageMonitor {
             history.remove(0);
         }
 
-        console::info!("📊 [StorageMonitor] Recorded metrics: {:.1}% used ({:.1} MB / {})", 
-                       usage_percentage, 
-                       current_usage as f64 / 1_048_576.0,
-                       if total_capacity == u64::MAX { "Unlimited".to_string() } else { format!("{:.1} MB", total_capacity as f64 / 1_048_576.0) });
+        console_info!("{}", format!(
+            "📊 [StorageMonitor] Recorded metrics: {:.1}% used ({:.1} MB / {})",
+            usage_percentage,
+            current_usage as f64 / 1_048_576.0,
+            if total_capacity == u64::MAX {
+                "Unlimited".to_string()
+            } else {
+                format!("{:.1} MB", total_capacity as f64 / 1_048_576.0)
+            }
+        ));
 
         Ok(metrics)
     }
 
     /// Record performance metrics for storage operations
-    pub fn record_performance(&mut self, 
-                            backend_name: &str, 
-                            operation: &str, 
-                            duration_ms: f64, 
-                            success: bool,
-                            bytes_transferred: u64) {
-        console::debug!("⚡ [StorageMonitor] Recording performance: {} {} in {:.2}ms ({})", 
-                       backend_name, operation, duration_ms, if success { "success" } else { "failed" });
+    pub fn record_performance(
+        &mut self,
+        backend_name: &str,
+        operation: &str,
+        duration_ms: f64,
+        success: bool,
+        bytes_transferred: u64,
+    ) {
+        console_debug!("{}", format!(
+            "⚡ [StorageMonitor] Recording performance: {} {} in {:.2}ms ({})",
+            backend_name,
+            operation,
+            duration_ms,
+            if success { "success" } else { "failed" }
+        ));
 
         let timestamp = js_sys::Date::now() as u64;
         let throughput_mbps = if duration_ms > 0.0 {
@@ -188,12 +220,19 @@ impl StorageMonitor {
         };
 
         // Get or create performance metrics for this backend
-        let history = self.performance_history.entry(backend_name.to_string()).or_default();
-        
+        let history = self
+            .performance_history
+            .entry(backend_name.to_string())
+            .or_default();
+
         // Create new metrics or update existing
         let new_metrics = if let Some(last_metrics) = history.last() {
             let total_ops = last_metrics.total_operations + 1;
-            let failed_ops = if success { last_metrics.failed_operations } else { last_metrics.failed_operations + 1 };
+            let failed_ops = if success {
+                last_metrics.failed_operations
+            } else {
+                last_metrics.failed_operations + 1
+            };
 
             PerformanceMetrics {
                 backend_name: backend_name.to_string(),
@@ -208,12 +247,18 @@ impl StorageMonitor {
                     last_metrics.average_retrieve_time_ms
                 },
                 store_success_rate: if operation == "store" {
-                    ((last_metrics.store_success_rate * last_metrics.total_operations as f64) + if success { 1.0 } else { 0.0 }) / total_ops as f64 * 100.0
+                    ((last_metrics.store_success_rate * last_metrics.total_operations as f64)
+                        + if success { 1.0 } else { 0.0 })
+                        / total_ops as f64
+                        * 100.0
                 } else {
                     last_metrics.store_success_rate
                 },
                 retrieve_success_rate: if operation == "retrieve" {
-                    ((last_metrics.retrieve_success_rate * last_metrics.total_operations as f64) + if success { 1.0 } else { 0.0 }) / total_ops as f64 * 100.0
+                    ((last_metrics.retrieve_success_rate * last_metrics.total_operations as f64)
+                        + if success { 1.0 } else { 0.0 })
+                        / total_ops as f64
+                        * 100.0
                 } else {
                     last_metrics.retrieve_success_rate
                 },
@@ -225,10 +270,26 @@ impl StorageMonitor {
         } else {
             PerformanceMetrics {
                 backend_name: backend_name.to_string(),
-                average_store_time_ms: if operation == "store" { duration_ms } else { 0.0 },
-                average_retrieve_time_ms: if operation == "retrieve" { duration_ms } else { 0.0 },
-                store_success_rate: if operation == "store" && success { 100.0 } else { 0.0 },
-                retrieve_success_rate: if operation == "retrieve" && success { 100.0 } else { 0.0 },
+                average_store_time_ms: if operation == "store" {
+                    duration_ms
+                } else {
+                    0.0
+                },
+                average_retrieve_time_ms: if operation == "retrieve" {
+                    duration_ms
+                } else {
+                    0.0
+                },
+                store_success_rate: if operation == "store" && success {
+                    100.0
+                } else {
+                    0.0
+                },
+                retrieve_success_rate: if operation == "retrieve" && success {
+                    100.0
+                } else {
+                    0.0
+                },
                 throughput_mbps,
                 total_operations: 1,
                 failed_operations: if success { 0 } else { 1 },
@@ -246,18 +307,22 @@ impl StorageMonitor {
 
     /// Predict storage capacity based on usage trends
     pub fn predict_capacity(&self, backend_name: &str) -> Option<CapacityPrediction> {
-        console::debug!("🔮 [StorageMonitor] Predicting capacity for {} backend", backend_name);
+        console_debug!("{}", format!(
+            "🔮 [StorageMonitor] Predicting capacity for {} backend",
+            backend_name
+        ));
 
         let metrics_history = self.metrics_history.get(backend_name)?;
         if metrics_history.len() < 2 {
-            console::warn!("⚠️ [StorageMonitor] Insufficient data for capacity prediction (need at least 2 data points)");
+            console_warn!("⚠️ [StorageMonitor] Insufficient data for capacity prediction (need at least 2 data points)");
             return Some(CapacityPrediction {
                 backend_name: backend_name.to_string(),
                 current_usage_bytes: metrics_history.last()?.current_usage_bytes,
                 predicted_full_date: None,
                 days_until_full: None,
                 confidence_level: 0.0,
-                recommended_action: "Continue monitoring - insufficient data for prediction".to_string(),
+                recommended_action: "Continue monitoring - insufficient data for prediction"
+                    .to_string(),
                 trend_direction: TrendDirection::InsufficientData,
                 growth_rate_bytes_per_day: 0.0,
             });
@@ -266,32 +331,41 @@ impl StorageMonitor {
         let latest = metrics_history.last()?;
         let oldest = &metrics_history[metrics_history.len().saturating_sub(10).min(0)]; // Use last 10 points max
 
-        let time_diff_days = (latest.last_updated - oldest.last_updated) as f64 / (1000.0 * 60.0 * 60.0 * 24.0);
-        let usage_diff_bytes = latest.current_usage_bytes as i64 - oldest.current_usage_bytes as i64;
+        let time_diff_days =
+            (latest.last_updated - oldest.last_updated) as f64 / (1000.0 * 60.0 * 60.0 * 24.0);
+        let usage_diff_bytes =
+            latest.current_usage_bytes as i64 - oldest.current_usage_bytes as i64;
 
         if time_diff_days <= 0.0 {
-            console::warn!("⚠️ [StorageMonitor] Invalid time difference for prediction");
+            console_warn!("⚠️ [StorageMonitor] Invalid time difference for prediction");
             return None;
         }
 
         let growth_rate_bytes_per_day = usage_diff_bytes as f64 / time_diff_days;
 
-        let trend_direction = if growth_rate_bytes_per_day > 1024.0 * 1024.0 { // > 1MB/day
+        let trend_direction = if growth_rate_bytes_per_day > 1024.0 * 1024.0 {
+            // > 1MB/day
             TrendDirection::Growing
-        } else if growth_rate_bytes_per_day < -1024.0 * 1024.0 { // < -1MB/day
+        } else if growth_rate_bytes_per_day < -1024.0 * 1024.0 {
+            // < -1MB/day
             TrendDirection::Decreasing
         } else {
             TrendDirection::Stable
         };
 
-        let (predicted_full_date, days_until_full) = if growth_rate_bytes_per_day > 0.0 && latest.total_capacity_bytes != u64::MAX {
-            let remaining_bytes = latest.total_capacity_bytes.saturating_sub(latest.current_usage_bytes) as f64;
-            let days_until_full = remaining_bytes / growth_rate_bytes_per_day;
-            let predicted_full_timestamp = latest.last_updated + (days_until_full * 24.0 * 60.0 * 60.0 * 1000.0) as u64;
-            (Some(predicted_full_timestamp), Some(days_until_full))
-        } else {
-            (None, None)
-        };
+        let (predicted_full_date, days_until_full) =
+            if growth_rate_bytes_per_day > 0.0 && latest.total_capacity_bytes != u64::MAX {
+                let remaining_bytes = latest
+                    .total_capacity_bytes
+                    .saturating_sub(latest.current_usage_bytes)
+                    as f64;
+                let days_until_full = remaining_bytes / growth_rate_bytes_per_day;
+                let predicted_full_timestamp =
+                    latest.last_updated + (days_until_full * 24.0 * 60.0 * 60.0 * 1000.0) as u64;
+                (Some(predicted_full_timestamp), Some(days_until_full))
+            } else {
+                (None, None)
+            };
 
         let confidence_level = (metrics_history.len().min(10) as f64 / 10.0).min(1.0);
 
@@ -303,19 +377,31 @@ impl StorageMonitor {
                     } else if days < 30.0 {
                         "WARNING: Storage will be full within a month - plan cleanup or storage expansion".to_string()
                     } else {
-                        "Monitor storage usage - growth detected but not immediate concern".to_string()
+                        "Monitor storage usage - growth detected but not immediate concern"
+                            .to_string()
                     }
                 } else {
-                    "Monitor storage usage - unlimited storage with growing usage detected".to_string()
+                    "Monitor storage usage - unlimited storage with growing usage detected"
+                        .to_string()
                 }
-            },
-            TrendDirection::Decreasing => "Storage usage is decreasing - continue current practices".to_string(),
-            TrendDirection::Stable => "Storage usage is stable - no immediate action needed".to_string(),
-            TrendDirection::InsufficientData => "Continue monitoring to gather more data for accurate predictions".to_string(),
+            }
+            TrendDirection::Decreasing => {
+                "Storage usage is decreasing - continue current practices".to_string()
+            }
+            TrendDirection::Stable => {
+                "Storage usage is stable - no immediate action needed".to_string()
+            }
+            TrendDirection::InsufficientData => {
+                "Continue monitoring to gather more data for accurate predictions".to_string()
+            }
         };
 
-        console::info!("🔮 [StorageMonitor] Capacity prediction: {} trend, {:.1} MB/day growth, {} confidence", 
-                       trend_direction.to_string(), growth_rate_bytes_per_day / 1_048_576.0, (confidence_level * 100.0) as u32);
+        console_info!("{}", format!(
+            "🔮 [StorageMonitor] Capacity prediction: {} trend, {:.1} MB/day growth, {} confidence",
+            trend_direction.to_string(),
+            growth_rate_bytes_per_day / 1_048_576.0,
+            (confidence_level * 100.0) as u32
+        ));
 
         Some(CapacityPrediction {
             backend_name: backend_name.to_string(),
@@ -332,7 +418,11 @@ impl StorageMonitor {
     /// Get comprehensive storage status report
     pub fn get_status_report(&self, backend_name: &str) -> Option<StorageStatusReport> {
         let latest_metrics = self.metrics_history.get(backend_name)?.last()?.clone();
-        let latest_performance = self.performance_history.get(backend_name).and_then(|h| h.last()).cloned();
+        let latest_performance = self
+            .performance_history
+            .get(backend_name)
+            .and_then(|h| h.last())
+            .cloned();
         let capacity_prediction = self.predict_capacity(backend_name);
 
         Some(StorageStatusReport {
@@ -349,7 +439,11 @@ impl StorageMonitor {
         let mut score = 100u32;
 
         // Check usage percentage
-        if let Some(metrics) = self.metrics_history.get(backend_name).and_then(|h| h.last()) {
+        if let Some(metrics) = self
+            .metrics_history
+            .get(backend_name)
+            .and_then(|h| h.last())
+        {
             if metrics.usage_percentage > 90.0 {
                 score = score.saturating_sub(30);
             } else if metrics.usage_percentage > 80.0 {
@@ -360,7 +454,11 @@ impl StorageMonitor {
         }
 
         // Check performance
-        if let Some(perf) = self.performance_history.get(backend_name).and_then(|h| h.last()) {
+        if let Some(perf) = self
+            .performance_history
+            .get(backend_name)
+            .and_then(|h| h.last())
+        {
             if perf.store_success_rate < 90.0 {
                 score = score.saturating_sub(20);
             } else if perf.store_success_rate < 95.0 {
@@ -392,7 +490,11 @@ impl StorageMonitor {
     fn generate_recommendations(&self, backend_name: &str) -> Vec<String> {
         let mut recommendations = Vec::new();
 
-        if let Some(metrics) = self.metrics_history.get(backend_name).and_then(|h| h.last()) {
+        if let Some(metrics) = self
+            .metrics_history
+            .get(backend_name)
+            .and_then(|h| h.last())
+        {
             if metrics.usage_percentage > 85.0 {
                 recommendations.push("Consider cleaning up old or unnecessary blobs".to_string());
             }
@@ -401,25 +503,36 @@ impl StorageMonitor {
             }
         }
 
-        if let Some(perf) = self.performance_history.get(backend_name).and_then(|h| h.last()) {
+        if let Some(perf) = self
+            .performance_history
+            .get(backend_name)
+            .and_then(|h| h.last())
+        {
             if perf.store_success_rate < 95.0 {
-                recommendations.push("Storage operations are failing - check backend health".to_string());
+                recommendations
+                    .push("Storage operations are failing - check backend health".to_string());
             }
             if perf.average_store_time_ms > 5000.0 {
-                recommendations.push("Storage operations are slow - consider backend optimization".to_string());
+                recommendations.push(
+                    "Storage operations are slow - consider backend optimization".to_string(),
+                );
             }
         }
 
         if let Some(prediction) = self.predict_capacity(backend_name) {
             if let Some(days) = prediction.days_until_full {
                 if days < 30.0 {
-                    recommendations.push(format!("Plan storage expansion - only {:.1} days until full", days));
+                    recommendations.push(format!(
+                        "Plan storage expansion - only {:.1} days until full",
+                        days
+                    ));
                 }
             }
         }
 
         if recommendations.is_empty() {
-            recommendations.push("Storage backend is healthy - continue current practices".to_string());
+            recommendations
+                .push("Storage backend is healthy - continue current practices".to_string());
         }
 
         recommendations
@@ -427,39 +540,55 @@ impl StorageMonitor {
 
     /// Log comprehensive monitoring summary
     pub fn log_monitoring_summary(&self, backend_name: &str) {
-        console::info!("📊 [StorageMonitor] === MONITORING SUMMARY FOR {} ===", backend_name);
-        
+        console_info!("{}", format!(
+            "📊 [StorageMonitor] === MONITORING SUMMARY FOR {} ===",
+            backend_name
+        ));
+
         if let Some(report) = self.get_status_report(backend_name) {
-            console::info!("💾 [StorageMonitor] Storage Usage: {:.1}% ({:.1} MB used)", 
-                           report.metrics.usage_percentage, 
-                           report.metrics.current_usage_bytes as f64 / 1_048_576.0);
-            
+            console_info!("{}", format!(
+                "💾 [StorageMonitor] Storage Usage: {:.1}% ({:.1} MB used)",
+                report.metrics.usage_percentage,
+                report.metrics.current_usage_bytes as f64 / 1_048_576.0
+            ));
+
             if let Some(perf) = &report.performance {
-                console::info!("⚡ [StorageMonitor] Performance: {:.1}% success rate, {:.2} MB/s throughput", 
-                               (perf.store_success_rate + perf.retrieve_success_rate) / 2.0,
-                               perf.throughput_mbps);
+                console_info!("{}", format!(
+                    "⚡ [StorageMonitor] Performance: {:.1}% success rate, {:.2} MB/s throughput",
+                    (perf.store_success_rate + perf.retrieve_success_rate) / 2.0,
+                    perf.throughput_mbps
+                ));
             }
-            
+
             if let Some(pred) = &report.prediction {
                 if let Some(days) = pred.days_until_full {
-                    console::info!("🔮 [StorageMonitor] Capacity Prediction: {:.1} days until full ({}% confidence)", 
-                                   days, (pred.confidence_level * 100.0) as u32);
+                    console_info!("{}", format!("🔮 [StorageMonitor] Capacity Prediction: {:.1} days until full ({}% confidence)", 
+                                   days, (pred.confidence_level * 100.0) as u32));
                 }
-                console::info!("📈 [StorageMonitor] Trend: {} ({:.1} MB/day growth)", 
-                               pred.trend_direction.to_string(), pred.growth_rate_bytes_per_day / 1_048_576.0);
+                console_info!("{}", format!(
+                    "📈 [StorageMonitor] Trend: {} ({:.1} MB/day growth)",
+                    pred.trend_direction.to_string(),
+                    pred.growth_rate_bytes_per_day / 1_048_576.0
+                ));
             }
-            
-            console::info!("🏥 [StorageMonitor] Health Score: {}/100", report.health_score);
-            
-            console::info!("💡 [StorageMonitor] Recommendations:");
+
+            console_info!("{}", format!(
+                "🏥 [StorageMonitor] Health Score: {}/100",
+                report.health_score
+            ));
+
+            console_info!("💡 [StorageMonitor] Recommendations:");
             for (i, rec) in report.recommendations.iter().enumerate() {
-                console::info!("   {}. {}", i + 1, rec);
+                console_info!("{}", format!("   {}. {}", i + 1, rec));
             }
         } else {
-            console::warn!("⚠️ [StorageMonitor] No monitoring data available for {}", backend_name);
+            console_warn!("{}", format!(
+                "⚠️ [StorageMonitor] No monitoring data available for {}",
+                backend_name
+            ));
         }
-        
-        console::info!("📊 [StorageMonitor] === END MONITORING SUMMARY ===");
+
+        console_info!("📊 [StorageMonitor] === END MONITORING SUMMARY ===");
     }
 }
 
