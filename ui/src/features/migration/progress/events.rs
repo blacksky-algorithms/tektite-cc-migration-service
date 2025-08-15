@@ -1,6 +1,5 @@
 //! Migration progress events and event handling
 
-
 /// Events that can occur during migration
 #[derive(Debug, Clone)]
 pub enum MigrationEvent {
@@ -36,7 +35,7 @@ impl CompositeEventHandler {
             handlers: Vec::new(),
         }
     }
-    
+
     pub fn add_handler<H: MigrationEventHandler + 'static>(&mut self, handler: H) {
         self.handlers.push(Box::new(handler));
     }
@@ -55,35 +54,35 @@ pub struct LoggingEventHandler;
 
 impl MigrationEventHandler for LoggingEventHandler {
     fn handle_event(&self, event: MigrationEvent) {
-        use gloo_console as console;
-        
+use crate::{console_debug, console_error, console_info, console_warn};
+
         match event {
             MigrationEvent::Started => {
-                console::info!("[Event] 🚀 Migration started");
+                console_info!("[Event] 🚀 Migration started");
             }
             MigrationEvent::StepBegun { step } => {
-                console::info!("[Event] 📋 Step begun: {}", step);
+                console_info!("{}", format!("[Event] 📋 Step begun: {}", step));
             }
             MigrationEvent::StepCompleted { step, duration_ms } => {
-                console::info!("[Event] ✅ Step completed: {} ({}ms)", step, duration_ms);
+                console_info!("{}", format!("[Event] ✅ Step completed: {} ({}ms)", step, duration_ms));
             }
             MigrationEvent::BlobProcessed { cid, bytes } => {
-                console::debug!("[Event] 📦 Blob processed: {} ({} bytes)", cid, bytes);
+                console_debug!("[Event] 📦 Blob processed: {} ({} bytes)", cid, bytes);
             }
             MigrationEvent::BlobFailed { cid, error } => {
-                console::warn!("[Event] ❌ Blob failed: {} - {}", cid, error);
+                console_warn!("{}", format!("[Event] ❌ Blob failed: {} - {}", cid, error));
             }
             MigrationEvent::Warning { message } => {
-                console::warn!("[Event] ⚠️ Warning: {}", message);
+                console_warn!("{}", format!("[Event] ⚠️ Warning: {}", message));
             }
             MigrationEvent::Error { message } => {
-                console::error!("[Event] ❌ Error: {}", message);
+                console_error!("{}", format!("[Event] ❌ Error: {}", message));
             }
             MigrationEvent::Completed { success } => {
                 if success {
-                    console::info!("[Event] 🎉 Migration completed successfully");
+                    console_info!("[Event] 🎉 Migration completed successfully");
                 } else {
-                    console::error!("[Event] ❌ Migration failed");
+                    console_error!("[Event] ❌ Migration failed");
                 }
             }
         }

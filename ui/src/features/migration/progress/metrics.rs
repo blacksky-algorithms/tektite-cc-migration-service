@@ -34,15 +34,15 @@ impl MigrationMetrics {
             strategy_used: None,
         }
     }
-    
+
     pub fn complete(&mut self) {
         self.end_time = Some(Instant::now());
     }
-    
+
     pub fn total_duration(&self) -> Option<Duration> {
         self.end_time.map(|end| end.duration_since(self.start_time))
     }
-    
+
     pub fn blobs_per_second(&self) -> Option<f64> {
         self.total_duration().map(|duration| {
             if duration.as_secs() > 0 {
@@ -52,7 +52,7 @@ impl MigrationMetrics {
             }
         })
     }
-    
+
     pub fn bytes_per_second(&self) -> Option<f64> {
         self.total_duration().map(|duration| {
             if duration.as_secs() > 0 {
@@ -62,7 +62,7 @@ impl MigrationMetrics {
             }
         })
     }
-    
+
     pub fn success_rate(&self) -> f64 {
         if self.total_blobs > 0 {
             self.migrated_blobs as f64 / self.total_blobs as f64

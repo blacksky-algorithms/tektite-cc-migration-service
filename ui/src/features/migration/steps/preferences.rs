@@ -3,7 +3,7 @@
 #[cfg(feature = "web")]
 use crate::services::client::{ClientSessionCredentials, PdsClient};
 use dioxus::prelude::*;
-use gloo_console as console;
+use crate::{console_info};
 
 use crate::features::migration::types::*;
 
@@ -19,7 +19,7 @@ pub async fn migrate_preferences_client_side(
     // Step 14: Export preferences from old PDS
     // NEWBOLD.md Step: goat bsky prefs export > prefs.json (line 115)
     // Implements: Exports Bluesky app preferences as JSON
-    console::info!("[Migration] Step 14: Exporting preferences from old PDS");
+    console_info!("[Migration] Step 14: Exporting preferences from old PDS");
     dispatch.call(MigrationAction::SetMigrationStep(
         "Exporting preferences from old PDS...".to_string(),
     ));
@@ -29,7 +29,7 @@ pub async fn migrate_preferences_client_side(
     let preferences_json = match pds_client.export_preferences(old_session).await {
         Ok(response) => {
             if response.success {
-                console::info!("[Migration] Preferences exported successfully");
+                console_info!("[Migration] Preferences exported successfully");
 
                 // Update preferences progress
                 let prefs_progress = PreferencesProgress {
@@ -49,15 +49,18 @@ pub async fn migrate_preferences_client_side(
     // Step 15: Import preferences to new PDS
     // NEWBOLD.md Step: goat bsky prefs import prefs.json (line 118)
     // Implements: Imports Bluesky app preferences to new PDS
-    console::info!("[Migration] Step 15: Importing preferences to new PDS");
+    console_info!("[Migration] Step 15: Importing preferences to new PDS");
     dispatch.call(MigrationAction::SetMigrationStep(
         "Importing preferences to new PDS...".to_string(),
     ));
 
-    match pds_client.import_preferences(new_session, preferences_json).await {
+    match pds_client
+        .import_preferences(new_session, preferences_json)
+        .await
+    {
         Ok(response) => {
             if response.success {
-                console::info!("[Migration] Preferences imported successfully");
+                console_info!("[Migration] Preferences imported successfully");
 
                 // Update preferences progress
                 let mut prefs_progress = state.preferences_progress.clone();

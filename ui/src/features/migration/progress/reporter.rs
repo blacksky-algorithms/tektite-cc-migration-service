@@ -1,7 +1,7 @@
 //! Progress reporting abstraction for migration operations
 
 use crate::features::migration::types::*;
-use gloo_console as console;
+use crate::{console_error, console_info};
 
 /// Trait for reporting migration progress
 pub trait ProgressReporter {
@@ -41,35 +41,35 @@ impl ProgressReporter for ConsoleProgressReporter {
     fn report_step(&self, step: MigrationStep) {
         match step {
             MigrationStep::RepositoryExport => {
-                console::info!("[Progress] 📦 Repository Export: Exporting data from old PDS");
+                console_info!("[Progress] 📦 Repository Export: Exporting data from old PDS");
             }
             MigrationStep::RepositoryImport => {
-                console::info!("[Progress] 📥 Repository Import: Importing data to new PDS");
+                console_info!("[Progress] 📥 Repository Import: Importing data to new PDS");
             }
             MigrationStep::BlobDiscovery => {
-                console::info!("[Progress] 🔍 Blob Discovery: Finding missing blobs");
+                console_info!("[Progress] 🔍 Blob Discovery: Finding missing blobs");
             }
             MigrationStep::BlobMigration => {
-                console::info!("[Progress] 🚛 Blob Migration: Transferring blob data");
+                console_info!("[Progress] 🚛 Blob Migration: Transferring blob data");
             }
             MigrationStep::PreferencesExport => {
-                console::info!("[Progress] ⚙️ Preferences Export: Exporting user preferences");
+                console_info!("[Progress] ⚙️ Preferences Export: Exporting user preferences");
             }
             MigrationStep::PreferencesImport => {
-                console::info!("[Progress] ⚙️ Preferences Import: Importing user preferences");
+                console_info!("[Progress] ⚙️ Preferences Import: Importing user preferences");
             }
             MigrationStep::PlcRecommendation => {
-                console::info!("[Progress] 📋 PLC Recommendation: Getting PLC transition details");
+                console_info!("[Progress] 📋 PLC Recommendation: Getting PLC transition details");
             }
             MigrationStep::PlcTokenRequest => {
-                console::info!("[Progress] 🎫 PLC Token Request: Requesting verification token");
+                console_info!("[Progress] 🎫 PLC Token Request: Requesting verification token");
             }
         }
     }
-    
+
     fn report_blob_progress(&self, progress: BlobProgress) {
         if let Some(current_cid) = &progress.current_blob_cid {
-            console::info!(
+            console_info!(
                 "[Progress] 📊 Blob Progress: {}/{} blobs ({:.1}% complete) - Current: {}",
                 progress.processed_blobs,
                 progress.total_blobs,
@@ -77,7 +77,7 @@ impl ProgressReporter for ConsoleProgressReporter {
                 current_cid
             );
         } else {
-            console::info!(
+            console_info!(
                 "[Progress] 📊 Blob Progress: {}/{} blobs ({:.1}% complete)",
                 progress.processed_blobs,
                 progress.total_blobs,
@@ -85,26 +85,26 @@ impl ProgressReporter for ConsoleProgressReporter {
             );
         }
     }
-    
+
     fn report_error(&self, error: &str) {
-        console::error!("[Progress] ❌ Migration Error: {}", error);
+        console_error!("{}", format!("[Progress] ❌ Migration Error: {}", error));
     }
-    
+
     fn report_completion(&self, result: MigrationResult) {
         if result.success {
-            console::info!(
+            console_info!(
                 "[Progress] ✅ Migration Complete: {} blobs migrated ({:.1} MB) in {}s",
                 result.total_blobs_migrated,
                 result.total_bytes_processed as f64 / 1_048_576.0,
                 result.duration_seconds
             );
         } else {
-            console::error!(
+            console_error!(
                 "[Progress] ❌ Migration Failed: {} errors occurred",
                 result.errors.len()
             );
             for error in &result.errors {
-                console::error!("[Progress]   - {}", error);
+                console_error!("{}", format!("[Progress]   - {}", error));
             }
         }
     }
@@ -112,14 +112,14 @@ impl ProgressReporter for ConsoleProgressReporter {
 
 /// UI-based progress reporter that dispatches to the application state
 pub struct UiProgressReporter<F>
-where 
+where
     F: Fn(MigrationAction) + Clone,
 {
     dispatch: F,
 }
 
 impl<F> UiProgressReporter<F>
-where 
+where
     F: Fn(MigrationAction) + Clone,
 {
     pub fn new(dispatch: F) -> Self {
@@ -128,7 +128,7 @@ where
 }
 
 impl<F> ProgressReporter for UiProgressReporter<F>
-where 
+where
     F: Fn(MigrationAction) + Clone,
 {
     fn report_step(&self, step: MigrationStep) {
@@ -142,18 +142,18 @@ where
             MigrationStep::PlcRecommendation => "Getting PLC recommendation...",
             MigrationStep::PlcTokenRequest => "Requesting PLC token...",
         };
-        
+
         (self.dispatch)(MigrationAction::SetMigrationStep(message.to_string()));
     }
-    
+
     fn report_blob_progress(&self, progress: BlobProgress) {
         (self.dispatch)(MigrationAction::SetBlobProgress(progress));
     }
-    
+
     fn report_error(&self, error: &str) {
         (self.dispatch)(MigrationAction::SetMigrationError(Some(error.to_string())));
     }
-    
+
     fn report_completion(&self, _result: MigrationResult) {
         (self.dispatch)(MigrationAction::SetMigrationCompleted(true));
     }

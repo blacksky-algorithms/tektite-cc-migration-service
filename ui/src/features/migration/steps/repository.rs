@@ -3,7 +3,7 @@
 #[cfg(feature = "web")]
 use crate::services::client::{ClientSessionCredentials, PdsClient};
 use dioxus::prelude::*;
-use gloo_console as console;
+use crate::{console_info};
 
 use crate::features::migration::types::*;
 
@@ -18,18 +18,18 @@ pub async fn migrate_repository_client_side(
     // Step 7: Export repository from old PDS
     // NEWBOLD.md Step: goat repo export $ACCOUNTDID (line 76)
     // Implements: Exports repository as CAR file for migration
-    console::info!("[Migration] Step 7: Exporting repository from old PDS");
+    console_info!("[Migration] Step 7: Exporting repository from old PDS");
     dispatch.call(MigrationAction::SetMigrationStep(
         "Exporting repository from old PDS...".to_string(),
     ));
 
     let pds_client = PdsClient::new();
-    
+
     let car_data = match pds_client.export_repository(old_session).await {
         Ok(response) => {
             if response.success {
                 let car_size = response.car_size.unwrap_or(0);
-                console::info!(
+                console_info!(
                     "[Migration] Repository exported successfully, size: {} bytes",
                     car_size.to_string()
                 );
@@ -53,7 +53,7 @@ pub async fn migrate_repository_client_side(
     // Step 8: Import repository to new PDS
     // NEWBOLD.md Step: goat repo import ./did:plc:do2ar6uqzrvyzq3wevji6fbe.20250625142552.car (line 81)
     // Implements: Imports repository CAR file to new PDS
-    console::info!("[Migration] Step 8: Importing repository to new PDS");
+    console_info!("[Migration] Step 8: Importing repository to new PDS");
     dispatch.call(MigrationAction::SetMigrationStep(
         "Importing repository to new PDS...".to_string(),
     ));
@@ -62,7 +62,7 @@ pub async fn migrate_repository_client_side(
     match pds_client.import_repository(new_session, car_data).await {
         Ok(response) => {
             if response.success {
-                console::info!("[Migration] Repository imported successfully");
+                console_info!("[Migration] Repository imported successfully");
 
                 // Update repo progress
                 let repo_progress = RepoProgress {

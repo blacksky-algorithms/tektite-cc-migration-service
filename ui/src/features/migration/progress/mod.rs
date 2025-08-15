@@ -1,7 +1,7 @@
-pub mod reporter;
-pub mod metrics;
 pub mod events;
+pub mod metrics;
+pub mod reporter;
 
-pub use reporter::*;
-pub use metrics::*;
 pub use events::*;
+pub use metrics::*;
+pub use reporter::*;
