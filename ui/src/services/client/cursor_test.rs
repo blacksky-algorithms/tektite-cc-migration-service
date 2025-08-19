@@ -3,13 +3,15 @@
 //! These tests verify that cursor handling matches the Go goat implementation
 //! for various edge cases including empty cursors, null cursors, and continuation.
 
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+    use wasm_bindgen_test::*;
 
     /// Test cursor parsing from JSON responses
-    #[test]
+    #[wasm_bindgen_test]
     fn test_cursor_parsing_edge_cases() {
         // Test case 1: Missing cursor field
         let json_no_cursor = json!({
@@ -56,7 +58,7 @@ mod tests {
     }
 
     /// Test cursor continuation logic (matches Go goat pattern)
-    #[test]
+    #[wasm_bindgen_test]
     fn test_cursor_continuation_logic() {
         // Test case 1: No cursor means stop (matches Go: resp.Cursor == nil)
         let response_cursor: Option<String> = None;
@@ -87,7 +89,7 @@ mod tests {
     }
 
     /// Test the full cursor state machine that mirrors Go goat behavior
-    #[test]
+    #[wasm_bindgen_test]
     fn test_cursor_state_machine() {
         // Simulate the pagination loop logic
         let test_cases = vec![
@@ -101,7 +103,7 @@ mod tests {
             let mut loop_should_break = false;
 
             // Simulate the cursor update logic from our pagination code
-            let mut cursor = if let Some(next_cursor) = input_cursor {
+            let cursor = if let Some(next_cursor) = input_cursor {
                 if !next_cursor.is_empty() {
                     Some(next_cursor) // Continue with next cursor
                 } else {
@@ -119,7 +121,7 @@ mod tests {
     }
 
     /// Test cursor URL encoding edge cases
-    #[test]
+    #[wasm_bindgen_test]
     fn test_cursor_url_encoding() {
         // Test that cursors with special characters are handled correctly
         let test_cursors = vec![

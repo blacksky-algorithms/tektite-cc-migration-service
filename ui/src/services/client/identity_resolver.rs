@@ -141,13 +141,13 @@ pub async fn resolve_handle_client_side(
 
     info!("Starting parallel handle resolution for {}", handle);
 
-    let (dns_result, http_result) = tokio::join!(
+    let (dns_result, http_result) = futures::join!(
         resolve_handle_dns_doh(doh_resolver, handle),
         resolve_handle_http(http_client, handle)
     );
 
     // Collect successful results
-    let mut results = Vec::new();
+    let mut results: Vec<String> = Vec::new();
 
     match &dns_result {
         Ok(did) => {
@@ -462,6 +462,7 @@ fn determine_provider_from_handle_domain(handle: &str) -> ClientPdsProvider {
 }
 
 /// Web-based identity resolver combining DNS-over-HTTPS and HTTP resolution
+#[derive(Clone)]
 pub struct WebIdentityResolver {
     pub dns_resolver: DnsOverHttpsResolver,
     pub http_client: Client,
@@ -474,11 +475,10 @@ impl WebIdentityResolver {
         Self {
             dns_resolver: DnsOverHttpsResolver::new(),
             http_client: {
-                    Client::builder()
-                        .user_agent("atproto-migration-service/1.0")
-                        .build()
-                        .expect("Failed to create HTTP client")
-
+                Client::builder()
+                    .user_agent("atproto-migration-service/1.0")
+                    .build()
+                    .expect("Failed to create HTTP client")
             },
             plc_hostname: "plc.directory".to_string(),
         }

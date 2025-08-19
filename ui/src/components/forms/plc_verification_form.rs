@@ -2,10 +2,10 @@ use dioxus::prelude::*;
 // Import console macros from our crate
 use crate::{console_error, console_info, console_warn};
 
-use crate::components::input::{InputType, ValidatedInput};
-use crate::features::migration::*;
+use crate::components::inputs::{InputType, ValidatedInput};
+use crate::migration::*;
 
-use crate::features::migration::{logic::convert_session_to_client, storage::LocalStorageManager};
+use crate::migration::{session_management::convert_session_to_client, storage::LocalStorageManager};
 use crate::services::client::PdsClient;
 
 #[derive(Props, PartialEq, Clone)]

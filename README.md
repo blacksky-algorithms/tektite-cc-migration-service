@@ -1,64 +1,141 @@
-# ATProto PDS Migration Service
+# Tektite CC Migration Service
 
-A client-side migration tool for the AT Protocol ecosystem, allowing users to transfer their accounts between different Personal Data Servers (PDS) while preserving all data and identity information.
+A high-performance, fully client-side migration tool built with Rust and WebAssembly for the AT Protocol ecosystem. Transfer your accounts between Personal Data Servers (PDS) with enterprise-grade reliability, advanced blob management, and fault-tolerant architecture.
 
 ![Migration Service UI](https://tektite.cc)
 
 ## Overview
 
-This migration service provides a fully client-side solution for transferring AT Protocol accounts (like Bluesky accounts) between different providers. It handles all aspects of the migration process:
+Tektite CC provides a sophisticated client-side solution for AT Protocol account migrations (Bluesky, other providers) with zero server dependencies. Built entirely in Rust and compiled to WebAssembly, it delivers native performance in the browser while implementing advanced features like:
 
-- Repository migration (posts, follows, etc.)
-- Blob migration (images and other attachments)
-- User preferences migration
-- PLC identity operations
-- Account activation/deactivation
+- **Smart Repository Migration** with resume capabilities
+- **Advanced Blob Management** (chunking, deduplication, verification)
+- **Multi-Storage Backends** (OPFS + LocalStorage fallback)
+- **Fault-Tolerant Architecture** with circuit breakers
+- **PLC Identity Operations** with secure token handling
+- **Progressive Migration** with detailed progress tracking
 
 ## Features
 
-- **Fully Client-Side**: No server component needed - all operations happen directly in the browser
-- **Resumable Migrations**: Can resume interrupted migrations from various checkpoints
-- **Cross-PDS Support**: Migrate between any compliant AT Protocol servers
-- **DNS-over-HTTPS**: Uses secure DNS-over-HTTPS for handle resolution
-- **Progress Tracking**: Detailed progress monitoring for long-running migrations
-- **Secure Credential Handling**: Proper handling of authentication tokens
-- **Custom Domain Support**: Handles FQDN migration with instructions for DNS updates
+### Core Migration Capabilities
+- **Zero Server Dependencies**: Pure client-side architecture with no backend requirements
+- **Resumable Migrations**: Checkpoint-based resumption at repository, blob, preferences, and PLC levels  
+- **Cross-PDS Support**: Migrate between any compliant AT Protocol servers (Bluesky, custom instances)
+- **Secure DNS-over-HTTPS**: Cloudflare DoH integration for reliable handle resolution
+
+### Advanced Streaming Architecture
+- **Performance Metrics**: Real-time monitoring of transfer rates, chunk efficiency, and memory usage
+- **Enhanced Error Handling**: Comprehensive error types with automatic recovery strategies
+- **Platform Optimization**: Adaptive configuration for browser, mobile, and desktop environments
+- **Memory Management**: Intelligent pressure monitoring with automatic cleanup and optimization
+- **Streaming Infrastructure**: Pure streaming approach with channel-tee pattern for efficient data flow
+
+### Fault Tolerance & Reliability  
+- **Modular Architecture**: Clean separation of concerns with focused, specialized modules
+- **Streaming-First Design**: Pure streaming approach eliminates legacy complexity and improves reliability
+- **Progress Monitoring**: Real-time metrics and detailed progress reporting with performance analytics
+- **Session Management**: Secure JWT handling with automatic refresh capabilities
+- **Network Resilience**: Automatic retry logic with intelligent backoff and recovery strategies
+
+### User Experience
+- **Progressive UI**: Step-by-step wizard with visual progress indicators
+- **Custom Domain Support**: FQDN migration with DNS update instructions
+- **Video Tutorial Integration**: Built-in guidance for complex migration scenarios
+- **Mobile Responsive**: Optimized for both desktop and mobile usage
 
 ## Architecture
 
-The application is built with a modern Rust + WebAssembly stack:
+Tektite CC is built with a sophisticated Rust + WebAssembly architecture optimized for performance and reliability:
 
-- **UI Layer**: Dioxus (Rust-based React-like framework)
-- **State Management**: Signal-based state with action dispatching
-- **Storage**: Multiple storage backends (LocalStorage, OPFS) with fallback strategy
-- **Networking**: Direct PDS API calls with client-side HTTP
+### Frontend Stack
+- **UI Framework**: Dioxus 0.6 (Rust-based reactive framework)
+- **State Management**: Signal-based architecture with action dispatching
+- **Compilation Target**: WebAssembly (WASM) for near-native performance
+- **Routing**: Client-side routing with Dioxus Router
+
+### Service Layer Architecture  
+```
+services/
+├── blob/                    # Streaming-optimized blob migration
+│   ├── blob_chunking.rs     # Intelligent chunk processing
+│   └── blob_opfs_storage.rs # Origin Private File System integration
+├── streaming/               # High-performance streaming infrastructure
+│   ├── metrics.rs           # Performance monitoring and analytics
+│   ├── errors.rs            # Enhanced error handling with recovery
+│   ├── traits.rs            # Core streaming abstractions
+│   ├── orchestrator.rs      # Stream coordination and management
+│   └── implementations.rs   # Browser-optimized implementations
+├── client/                  # PDS communication layer
+│   ├── api/                 # API endpoint implementations
+│   ├── auth/                # Authentication and session management
+│   ├── pds_client.rs        # Direct AT Protocol API calls
+│   ├── dns_over_https.rs    # Secure handle resolution via Cloudflare
+│   └── identity_resolver.rs # Handle-to-DID resolution
+└── config/                  # Unified configuration system
+    ├── unified_config.rs     # Platform-specific optimizations
+    └── storage_estimator.rs  # Storage quota management
+```
+
+### Migration Orchestration
+- **Step-by-Step Processing**: Repository → Blobs → Preferences → PLC
+- **Comprehensive Resume System**: Full checkpoint-based resumption at all migration levels
+- **Progress Tracking**: Real-time metrics and event reporting with throughput analysis
+- **Error Recovery**: Automatic retry with exponential backoff and circuit breaker patterns
+
+### Storage Architecture
+- **Primary**: OPFS (Origin Private File System) for optimal performance and unlimited capacity
+- **Secondary**: IndexedDB for broad browser compatibility with good performance
+- **Fallback**: LocalStorage for maximum compatibility (5-10MB limit)
+- **Intelligent Selection**: Automatic backend selection based on browser capabilities and storage requirements
 
 ## Getting Started
 
 ### Prerequisites
 
-- Rust toolchain (1.70+ recommended)
-- Dioxus CLI
+- **Rust toolchain** (1.88+ recommended)
+- **Dioxus CLI** for development and building
+- **Modern browser** with WebAssembly and OPFS support (Chrome recommended)
 
-### Installation
+### Development Setup
 
-1. Clone the repository:
+1. **Clone the repository**:
    ```bash
-   git clone https://github.com/username/atproto-migration-service.git
-   cd atproto-migration-service
+   git clone https://github.com/blacksky-algorithms/tektite-cc-migration-service.git
+   cd tektite-cc-migration-service
    ```
 
-2. Install the Dioxus CLI:
+2. **Install Dioxus CLI**:
    ```bash
    cargo install dioxus-cli
    ```
 
-3. Build and run:
+3. **Install dependencies**:
+   ```bash
+   cargo check
+   ```
+
+4. **Run development server**:
    ```bash
    dx serve
    ```
 
-4. Access the application at `http://localhost:8080`
+5. **Access the application**: Open `http://localhost:8080` in your browser
+
+### Quick Development Commands
+
+```bash
+# Hot reload development
+dx serve
+
+# Build for production  
+dx build --release --features web --package web
+
+# Run tests
+cargo test --target wasm32-unknown-unknown
+
+# Check code formatting
+cargo clippy --target wasm32-unknown-unknown
+```
 
 ## Usage
 
@@ -83,25 +160,57 @@ The migration process consists of four main steps:
 ### Project Structure
 
 ```
-.
-├── Cargo.toml          # Workspace configuration
-├── ui/                 # Shared UI components
+tektite-cc-migration-service/
+├── Cargo.toml                  # Workspace configuration
+├── ui/                         # Core UI library
+│   ├── Cargo.toml             # UI crate dependencies
 │   ├── src/
-│   │   ├── app/        # Main application components
-│   │   ├── components/ # Reusable UI components
-│   │   ├── features/   # Feature modules (migration, etc.)
-│   │   ├── services/   # Client-side services (DNS, PDS, etc.)
-│   │   └── utils/      # Utility functions
-├── web/                # Web application entry point
+│   │   ├── app/               # Main application components
+│   │   │   └── migration_service.rs
+│   │   ├── components/        # Reusable UI components
+│   │   │   ├── display/       # Progress, loading indicators
+│   │   │   ├── forms/         # Login, migration detail forms
+│   │   │   └── layout/        # Navigation, layout components
+│   │   ├── migration/         # Migration orchestration (refactored)
+│   │   │   ├── account_operations.rs  # Account creation and status
+│   │   │   ├── logic.rs       # Main migration orchestration
+│   │   │   ├── resume_handlers.rs     # Checkpoint resumption logic
+│   │   │   ├── session_management.rs  # Session conversion utilities
+│   │   │   ├── validation.rs  # Migration validation and verification
+│   │   │   ├── progress/      # Event tracking, metrics
+│   │   │   ├── steps/         # Repo, blob, PLC, preferences
+│   │   │   └── types.rs       # State management types
+│   │   ├── services/          # Client-side service layer
+│   │   │   ├── blob/          # Streaming-optimized blob migration
+│   │   │   │   ├── blob_chunking.rs
+│   │   │   │   └── blob_opfs_storage.rs
+│   │   │   ├── streaming/     # High-performance streaming infrastructure
+│   │   │   │   ├── metrics.rs      # Performance monitoring
+│   │   │   │   ├── errors.rs       # Enhanced error handling
+│   │   │   │   ├── traits.rs       # Core abstractions
+│   │   │   │   └── orchestrator.rs # Stream coordination
+│   │   │   ├── client/        # PDS communication
+│   │   │   │   ├── api/       # API endpoint implementations
+│   │   │   │   ├── auth/      # Authentication management
+│   │   │   │   └── pds_client.rs
+│   │   │   ├── config/        # Unified configuration system
+│   │   │   │   ├── unified_config.rs   # Platform optimizations
+│   │   │   │   └── storage_estimator.rs
+│   │   │   └── errors/        # Error handling
+│   │   └── utils/             # Validation, serialization
+├── web/                       # Web application entry point
+│   ├── Cargo.toml            # Web app dependencies
+│   └── src/main.rs           # WASM application entry
+└── assets/                   # Static assets (CSS, images)
 ```
 
 ### Building for Production
 
 ```bash
-dx build --release
+dx build --release --features web --package web
 ```
 
-Production files will be output to the `dist` directory.
+
 
 ## Contributions
 

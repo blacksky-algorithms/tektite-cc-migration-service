@@ -1,4 +1,4 @@
-use crate::features::migration::{
+use crate::migration::{
     EmailValidation, HandleValidation, MigrationState, PasswordValidation,
 };
 

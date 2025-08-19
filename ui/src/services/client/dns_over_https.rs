@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use lru::LruCache;
 use reqwest::Client;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{error, info, warn};
 
@@ -26,11 +26,12 @@ pub trait DnsResolver {
 }
 
 /// DNS-over-HTTPS resolver with caching and fallback support
+#[derive(Clone)]
 pub struct DnsOverHttpsResolver {
     http_client: Client,
     primary_endpoint: String,
     fallback_endpoints: Vec<String>,
-    cache: Mutex<LruCache<String, CachedDnsResponse>>,
+    cache: Arc<Mutex<LruCache<String, CachedDnsResponse>>>,
     timeout: Duration,
 }
 
@@ -39,10 +40,10 @@ impl DnsOverHttpsResolver {
     pub fn new() -> Self {
         Self {
             http_client: {
-                    Client::builder()
-                        .user_agent("atproto-migration-service/1.0")
-                        .build()
-                        .expect("Failed to create HTTP client")
+                Client::builder()
+                    .user_agent("atproto-migration-service/1.0")
+                    .build()
+                    .expect("Failed to create HTTP client")
             },
             primary_endpoint: "https://mozilla.cloudflare-dns.com/dns-query".to_string(),
             fallback_endpoints: vec![
@@ -50,7 +51,7 @@ impl DnsOverHttpsResolver {
                 "https://dns.google/resolve".to_string(),
                 "https://dns.quad9.net:5053/dns-query".to_string(),
             ],
-            cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
+            cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap()))),
             timeout: Duration::from_secs(5),
         }
     }
@@ -59,14 +60,14 @@ impl DnsOverHttpsResolver {
     pub fn with_endpoints(primary: String, fallbacks: Vec<String>) -> Self {
         Self {
             http_client: {
-                    Client::builder()
-                        .user_agent("atproto-migration-service/1.0")
-                        .build()
-                        .expect("Failed to create HTTP client")
+                Client::builder()
+                    .user_agent("atproto-migration-service/1.0")
+                    .build()
+                    .expect("Failed to create HTTP client")
             },
             primary_endpoint: primary,
             fallback_endpoints: fallbacks,
-            cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
+            cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap()))),
             timeout: Duration::from_secs(5),
         }
     }

@@ -13,7 +13,7 @@ fn current_time_secs() -> u64 {
 
 use super::errors::ClientError;
 use super::types::ClientSessionCredentials;
-use crate::features::migration::types::MigrationProgress;
+use crate::migration::types::MigrationProgress;
 
 /// Session manager for secure credential storage and management
 pub struct SessionManager {

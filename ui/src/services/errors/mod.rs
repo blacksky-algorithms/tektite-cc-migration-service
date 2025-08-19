@@ -32,10 +32,23 @@ pub enum MigrationError {
     #[error("Resume error: {reason}")]
     Resume { reason: String },
 
+    #[error("Circuit breaker open: {reason} - retry after {retry_after_ms}ms")]
+    CircuitBreakerOpen { reason: String, retry_after_ms: u64 },
+
+    #[error("Deduplication error: {operation} - {message}")]
+    Deduplication { operation: String, message: String },
+
+    #[error("Integrity verification failed: {cid} - {reason}")]
+    IntegrityCheckFailed { cid: String, reason: String },
+
+    #[error("Progress tracking error: {component} - {error}")]
+    ProgressTracking { component: String, error: String },
+
     #[error("Unknown error: {message}")]
     Unknown { message: String },
 }
 
+/// Enhanced storage error with more specific failure types
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("Storage backend unavailable: {backend}")]
@@ -49,6 +62,16 @@ pub enum StorageError {
 
     #[error("Storage initialization failed: {backend} - {error}")]
     InitializationFailed { backend: String, error: String },
+
+    #[error("Blob not found: {cid} in {backend}")]
+    BlobNotFound { cid: String, backend: String },
+
+    #[error("Storage operation failed after {attempts} attempts")]
+    RetryExhausted {
+        attempts: u32,
+        #[source]
+        cause: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 impl From<StorageError> for MigrationError {
@@ -104,4 +127,42 @@ impl MigrationError {
             _ => 0,
         }
     }
+
+    /// Get error severity for logging/alerting purposes
+    pub fn severity(&self) -> ErrorSeverity {
+        match self {
+            MigrationError::IntegrityCheckFailed { .. } => ErrorSeverity::Critical,
+            MigrationError::Storage { source, .. } => match source {
+                StorageError::QuotaExceeded { .. } => ErrorSeverity::High,
+                StorageError::InitializationFailed { .. } => ErrorSeverity::High,
+                _ => ErrorSeverity::Medium,
+            },
+            MigrationError::CircuitBreakerOpen { .. } => ErrorSeverity::Medium,
+            MigrationError::Network { .. } => ErrorSeverity::Low,
+            MigrationError::Configuration { .. } => ErrorSeverity::High,
+            MigrationError::Authentication { .. } => ErrorSeverity::High,
+            _ => ErrorSeverity::Medium,
+        }
+    }
+
+    /// Check if error indicates a temporary condition
+    pub fn is_temporary(&self) -> bool {
+        match self {
+            MigrationError::Network { .. } => true,
+            MigrationError::CircuitBreakerOpen { .. } => true,
+            MigrationError::Storage { source, .. } => {
+                matches!(source, StorageError::BackendUnavailable { .. })
+            }
+            _ => false,
+        }
+    }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorSeverity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+

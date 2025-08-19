@@ -5,13 +5,13 @@ use crate::services::client::{ClientPdsProvider, JwtUtils, MigrationClient};
 
 use dioxus::prelude::*;
 // Import console macros from our crate
-use crate::{console_log, console_error, console_info, console_warn};
+use crate::{console_error, console_info, console_log, console_warn};
 
 use crate::components::{
     display::ProviderDisplay,
-    input::{InputType, ValidatedInput},
+    inputs::{InputType, ValidatedInput},
 };
-use crate::features::migration::{storage::LocalStorageManager, *};
+use crate::migration::{storage::LocalStorageManager, *};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct ClientLoginFormComponentProps {

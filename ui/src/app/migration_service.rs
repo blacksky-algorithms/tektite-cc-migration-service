@@ -1,16 +1,16 @@
+use crate::console_info;
 use dioxus::prelude::*;
-use crate::{console_info};
 
 // New import paths after refactoring
 use crate::components::display::VideoAccordion;
 use crate::components::forms::{MigrationDetailsForm, PdsSelectionForm, PlcVerificationForm};
-use crate::features::migration::{FormStep, MigrationAction, MigrationState};
+use crate::migration::{FormStep, MigrationAction, MigrationState};
 
 #[cfg(feature = "web")]
 use crate::components::forms::ClientLoginFormComponent;
 
 // Feature will temporarily alias LocalStorageManager until we update it
-use crate::features::migration::storage::LocalStorageManager;
+use crate::migration::storage::LocalStorageManager;
 
 const MIGRATION_SERVICE_CSS: Asset = asset!("/assets/styling/migration_service.css");
 

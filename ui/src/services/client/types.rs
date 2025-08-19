@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use cid::Cid;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys;
@@ -185,7 +186,7 @@ pub struct ClientRepoImportResponse {
 /// Missing blob information
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ClientMissingBlob {
-    pub cid: String,
+    pub cid: Cid,
     #[serde(rename = "recordUri")]
     pub record_uri: String,
 }
@@ -212,6 +213,14 @@ pub struct ClientBlobExportResponse {
 pub struct ClientBlobUploadResponse {
     pub success: bool,
     pub message: String,
+}
+
+/// Blob streaming export response (no blob_data field for memory efficiency)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ClientBlobStreamResponse {
+    pub success: bool,
+    pub message: String,
+    pub blob_size: Option<u64>,
 }
 
 /// Preferences export response
@@ -274,7 +283,7 @@ pub struct ClientDeactivationResponse {
 }
 
 /// Account status response
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct ClientAccountStatusResponse {
     pub success: bool,
     pub message: String,
@@ -352,6 +361,6 @@ pub struct ClientServiceAuthResponse {
 pub struct ClientSyncListBlobsResponse {
     pub success: bool,
     pub message: String,
-    pub cids: Option<Vec<String>>, // Simple CID list (matches Go []string)
-    pub cursor: Option<String>,    // Pagination cursor (matches Go *string)
+    pub cids: Option<Vec<Cid>>, // CID list with proper CID type validation
+    pub cursor: Option<String>, // Pagination cursor (matches Go *string)
 }

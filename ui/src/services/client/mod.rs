@@ -8,7 +8,8 @@
 //
 // This replaces server-side functions to create a fully browser-based migration service.
 
-pub mod cid;
+pub mod api;
+pub mod auth;
 pub mod dns_over_https;
 pub mod errors;
 pub mod identity_resolver;

@@ -125,7 +125,6 @@ fn parse_storage_estimate_result(
     })
 }
 
-
 /// Get storage estimate with graceful fallback
 /// Returns None if the API is not supported or fails
 pub async fn try_get_storage_estimate() -> Option<StorageEstimate> {

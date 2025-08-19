@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::features::migration::*;
+use crate::migration::*;
 
 #[derive(Props, PartialEq, Clone)]
 pub struct BlobProgressDisplayProps {

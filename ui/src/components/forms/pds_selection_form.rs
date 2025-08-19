@@ -6,9 +6,9 @@ use crate::services::client::compat::{describe_server, resolve_handle_shared};
 
 use crate::components::{
     display::LoadingIndicator,
-    input::{InputType, ValidatedInput},
+    inputs::{InputType, ValidatedInput},
 };
-use crate::features::migration::*;
+use crate::migration::*;
 
 #[derive(Props, PartialEq, Clone)]
 pub struct PdsSelectionFormProps {
@@ -209,8 +209,36 @@ pub fn PdsSelectionForm(props: PdsSelectionFormProps) -> Element {
                     if let Some(links) = &describe_response.links {
                         if links.privacy_policy.is_some() || links.terms_of_service.is_some() {
                             div {
-                                style: "margin-top: 8px; font-size: 0.75rem; color: #6b7280;",
-                                "Policy documents available"
+                                style: "margin-top: 8px; font-size: 0.75rem; color: #D3FC51;",
+                                div {
+                                    style: "margin-bottom: 4px;",
+                                    "Policy documents:"
+                                }
+                                ul {
+                                    style: "margin: 0; padding-left: 16px; list-style: none;",
+                                    if let Some(privacy_url) = &links.privacy_policy {
+                                        li {
+                                            style: "margin-bottom: 2px;",
+                                            a {
+                                                href: "{privacy_url}",
+                                                target: "_blank",
+                                                style: "color: #D3FC51; text-decoration: underline;",
+                                                "Privacy Policy"
+                                            }
+                                        }
+                                    }
+                                    if let Some(terms_url) = &links.terms_of_service {
+                                        li {
+                                            style: "margin-bottom: 2px;",
+                                            a {
+                                                href: "{terms_url}",
+                                                target: "_blank",
+                                                style: "color: #D3FC51; text-decoration: underline;",
+                                                "Terms of Service"
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

@@ -1,8 +1,10 @@
 mod storage_estimator;
+mod unified_config;
 
 pub use storage_estimator::{
     get_storage_estimate, try_get_storage_estimate, StorageEstimate, StorageEstimatorError,
 };
+pub use unified_config::*;
 
 #[derive(Debug, Clone)]
 pub struct MigrationConfig {
@@ -10,6 +12,16 @@ pub struct MigrationConfig {
     pub concurrency: ConcurrencyConfig,
     pub retry: RetryConfig,
     pub blob: BlobConfig,
+    pub architecture: MigrationArchitecture,
+}
+
+/// Migration architecture choice (WASM-first)
+#[derive(Debug, Clone, PartialEq)]
+pub enum MigrationArchitecture {
+    /// Traditional approach: download -> store -> upload separately
+    Traditional,
+    /// Streaming approach: use channel-tee pattern for simultaneous operations (WASM-compatible)
+    Streaming,
 }
 
 #[derive(Debug, Clone)]
@@ -55,9 +67,9 @@ impl Default for BlobConfig {
     fn default() -> Self {
         Self {
             enumeration_method: BlobEnumerationMethod::MissingBlobs, // Default to migration-optimized
-            verification_delay_ms: 3000,    // 3 seconds initial delay after uploads
-            max_verification_attempts: 5,   // Try up to 5 times to verify uploads
-            verification_backoff_ms: 2000,  // 2 seconds linear backoff between attempts
+            verification_delay_ms: 3000, // 3 seconds initial delay after uploads
+            max_verification_attempts: 5, // Try up to 5 times to verify uploads
+            verification_backoff_ms: 2000, // 2 seconds linear backoff between attempts
         }
     }
 }
@@ -133,14 +145,21 @@ impl Default for MigrationConfig {
     }
 }
 
+impl Default for MigrationArchitecture {
+    fn default() -> Self {
+        Self::Streaming // Default to WASM-optimized streaming architecture
+    }
+}
+
 impl MigrationConfig {
-    /// Create a new configuration with conservative defaults for wasm32-unknown-unknown
+    /// Create a new configuration optimized for WASM environment
     pub fn new() -> Self {
         Self {
             storage: StorageConfig::conservative_defaults(),
             concurrency: ConcurrencyConfig::conservative_defaults(),
             retry: RetryConfig::conservative_defaults(),
             blob: BlobConfig::default(),
+            architecture: MigrationArchitecture::Streaming, // Default to streaming for WASM
         }
     }
 
@@ -176,6 +195,7 @@ impl MigrationConfig {
             },
             retry: RetryConfig::conservative_defaults(),
             blob: BlobConfig::default(),
+            architecture: MigrationArchitecture::Streaming, // Always use streaming for WASM
         }
     }
 
@@ -202,15 +222,17 @@ static GLOBAL_CONFIG: OnceLock<MigrationConfig> = OnceLock::new();
 
 /// Get the global configuration, initialized with conservative defaults
 pub fn get_global_config() -> MigrationConfig {
-    GLOBAL_CONFIG.get_or_init(|| {
-        let config = MigrationConfig::new();
-        if let Err(e) = config.validate() {
-            web_sys::console::warn_1(&format!("Invalid configuration: {}", e).into());
-            MigrationConfig::new()
-        } else {
-            config
-        }
-    }).clone()
+    GLOBAL_CONFIG
+        .get_or_init(|| {
+            let config = MigrationConfig::new();
+            if let Err(e) = config.validate() {
+                web_sys::console::warn_1(&format!("Invalid configuration: {}", e).into());
+                MigrationConfig::new()
+            } else {
+                config
+            }
+        })
+        .clone()
 }
 
 /// Initialize global configuration with browser storage integration (async version)

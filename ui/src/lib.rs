@@ -4,7 +4,7 @@ pub mod app;
 pub use app::MigrationService;
 
 pub mod components;
-pub mod features;
+pub mod migration;
 pub mod services;
 pub mod utils;
 

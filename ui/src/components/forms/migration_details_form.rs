@@ -2,12 +2,12 @@ use dioxus::prelude::*;
 
 use crate::components::{
     display::BlobProgressDisplay,
-    input::{
+    inputs::{
         EmailValidationFeedback, HandleValidationFeedback, InputType, PasswordValidationFeedback,
         ValidatedInput,
     },
 };
-use crate::features::migration::{
+use crate::migration::{
     form_validation::{get_form3_validation_message, validate_form3_complete},
     *,
 };
@@ -22,10 +22,10 @@ use crate::services::client::WebIdentityResolver;
 
 // Import the appropriate migration logic based on feature flags
 #[cfg(feature = "web")]
-use crate::features::migration::logic::execute_migration_client_side;
+use crate::migration::logic::execute_migration_client_side;
 
 #[cfg(not(feature = "web"))]
-use crate::features::migration::logic::execute_migration;
+use crate::migration::logic::execute_migration;
 
 #[derive(Props, PartialEq, Clone)]
 pub struct MigrationDetailsFormProps {

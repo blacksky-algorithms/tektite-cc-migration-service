@@ -1,4 +1,4 @@
-use crate::features::migration::MigrationState;
+use crate::migration::MigrationState;
 
 impl MigrationState {
     /// Generate a smart handle suggestion based on the original handle and PDS response
@@ -44,7 +44,7 @@ impl MigrationState {
     }
 
     /// Check if the original handle is a custom domain requiring DNS setup
-    /// 
+    ///
     /// This distinguishes between:
     /// - PDS subdomains (e.g., "tektitef5.bsky.social" on PDS offering ".bsky.social") - returns false
     /// - True custom domains (e.g., "slavecodes.org" DNS-verified) - returns true
@@ -69,14 +69,14 @@ impl MigrationState {
             for domain in available_domains {
                 let domain_suffix = domain.trim();
                 let original_lower = original.trim().to_lowercase();
-                
+
                 // Handle domain suffix with or without leading dot
                 let normalized_suffix = if domain_suffix.starts_with('.') {
                     domain_suffix.to_lowercase()
                 } else {
                     format!(".{}", domain_suffix.to_lowercase())
                 };
-                
+
                 // If original handle ends with this domain suffix, it's a PDS subdomain, not a custom domain
                 if original_lower.ends_with(&normalized_suffix) {
                     // Additional check: ensure it's actually a subdomain (has prefix)

@@ -4,10 +4,10 @@ use gloo_storage::{LocalStorage, Storage};
 use serde_json;
 
 use crate::components::{
-    input::{ValidatedInput, InputType},
+    inputs::{ValidatedInput, InputType},
     display::ProviderDisplay,
 };
-use crate::features::migration::types::*;
+use crate::migration::types::*;
 use crate::services::client::{compat, ClientLoginRequest, ClientPdsProvider, resolve_handle_shared, pds_login};
 
 #[derive(Props, PartialEq, Clone)]
