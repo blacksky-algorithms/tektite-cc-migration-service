@@ -5,20 +5,18 @@
 //! and implement blob management functionality.
 
 use anyhow::Result;
-use tracing::{error, info, instrument};
 use cid::Cid;
 use std::convert::TryFrom;
+use tracing::{error, info, instrument};
 
 // Import console macros from our crate
 use crate::console_debug;
 
 use crate::services::client::errors::ClientError;
-use crate::services::client::PdsClient;
 use crate::services::client::types::{
-    ClientSessionCredentials,
-    ClientBlobExportResponse,
-    ClientBlobUploadResponse,
+    ClientBlobExportResponse, ClientBlobUploadResponse, ClientSessionCredentials,
 };
+use crate::services::client::PdsClient;
 
 /// Export/download a blob from PDS
 // NEWBOLD.md Step: goat blob export $ACCOUNTDID (line 98) - individual blob download
@@ -176,7 +174,11 @@ pub fn stream_blob_chunked_impl(
     });
 
     // Create buffered stream using simple chunking for WASM compatibility
-    Ok(create_buffered_stream_impl(input_stream, buffer_size, chunk_size))
+    Ok(create_buffered_stream_impl(
+        input_stream,
+        buffer_size,
+        chunk_size,
+    ))
 }
 
 /// Create a buffered stream adapter for optimal memory usage in WASM
@@ -287,9 +289,15 @@ pub async fn upload_blob_chunked_impl(
 
     // For large blobs, we could implement chunked processing here
     // For now, this is equivalent to regular upload but with explicit chunked naming
-    upload_blob_impl(client, session, &Cid::try_from(cid.as_str()).map_err(|e| ClientError::NetworkError { 
-        message: format!("Invalid CID: {}", e) 
-    })?, blob_data).await
+    upload_blob_impl(
+        client,
+        session,
+        &Cid::try_from(cid.as_str()).map_err(|e| ClientError::NetworkError {
+            message: format!("Invalid CID: {}", e),
+        })?,
+        blob_data,
+    )
+    .await
 }
 
 /// Stream upload a blob from a stream of bytes with triple buffer optimization
@@ -323,9 +331,7 @@ where
     );
 
     // For WASM compatibility, collect the stream with simple buffering
-    console_debug!(
-        "[PdsClient] Using simple buffering for stream collection (WASM optimized)"
-    );
+    console_debug!("[PdsClient] Using simple buffering for stream collection (WASM optimized)");
     let mut collected_data = Vec::new();
     let mut total_bytes = 0u64;
     let mut chunk_count = 0u32;

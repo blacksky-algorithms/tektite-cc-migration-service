@@ -5,24 +5,20 @@
 //! and implement repository management functionality.
 
 use anyhow::Result;
-use reqwest::header;
-use tracing::{error, info, instrument};
 use cid::Cid;
+use reqwest::header;
 use std::convert::TryFrom;
+use tracing::{error, info, instrument};
 
 // Import console macros from our crate
 use crate::console_debug;
 
 use crate::services::client::errors::ClientError;
-use crate::services::client::PdsClient;
 use crate::services::client::types::{
-    ClientSessionCredentials,
-    ClientRepoExportResponse,
-    ClientRepoImportResponse,
-    ClientMissingBlobsResponse,
-    ClientMissingBlob,
-    ClientSyncListBlobsResponse,
+    ClientMissingBlob, ClientMissingBlobsResponse, ClientRepoExportResponse,
+    ClientRepoImportResponse, ClientSessionCredentials, ClientSyncListBlobsResponse,
 };
+use crate::services::client::PdsClient;
 
 /// Export repository from PDS as CAR file
 // NEWBOLD.md Step: goat repo export $ACCOUNTDID (line 76)
@@ -158,8 +154,7 @@ pub async fn get_missing_blobs_impl(
     info!("Getting missing blobs for DID: {}", session.did);
 
     // NEWBOLD.md: com.atproto.repo.listMissingBlobs for migration-specific blob enumeration
-    let mut missing_blobs_url =
-        format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
+    let mut missing_blobs_url = format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
     let mut query_params = Vec::new();
 
     if let Some(cursor) = cursor {
@@ -194,17 +189,16 @@ pub async fn get_missing_blobs_impl(
                 })?;
 
         // Parse the blobs from the response using proper deserialization
-        let missing_blobs =
-            if let Some(blobs_array) = blobs_data.get("blobs").and_then(|b| b.as_array()) {
-                blobs_array
-                    .iter()
-                    .filter_map(|blob| {
-                        serde_json::from_value::<ClientMissingBlob>(blob.clone()).ok()
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
+        let missing_blobs = if let Some(blobs_array) =
+            blobs_data.get("blobs").and_then(|b| b.as_array())
+        {
+            blobs_array
+                .iter()
+                .filter_map(|blob| serde_json::from_value::<ClientMissingBlob>(blob.clone()).ok())
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let cursor = blobs_data
             .get("cursor")
@@ -291,10 +285,7 @@ pub async fn sync_list_blobs_impl(
         let cids = if let Some(cids_array) = blobs_data.get("cids").and_then(|c| c.as_array()) {
             cids_array
                 .iter()
-                .filter_map(|cid| {
-                    cid.as_str()
-                        .and_then(|s| Cid::try_from(s).ok())
-                })
+                .filter_map(|cid| cid.as_str().and_then(|s| Cid::try_from(s).ok()))
                 .collect()
         } else {
             Vec::new()
@@ -348,9 +339,7 @@ pub async fn list_all_source_blobs_impl(
             cursor.as_ref().unwrap_or(&"<none>".to_string())
         );
 
-        match sync_list_blobs_impl(client, session, did, cursor.clone(), Some(500), None)
-            .await
-        {
+        match sync_list_blobs_impl(client, session, did, cursor.clone(), Some(500), None).await {
             Ok(response) => {
                 if response.success {
                     if let Some(mut batch_cids) = response.cids {
@@ -418,9 +407,7 @@ pub async fn list_all_target_blobs_impl(
             cursor.as_ref().unwrap_or(&"<none>".to_string())
         );
 
-        match sync_list_blobs_impl(client, session, did, cursor.clone(), Some(500), None)
-            .await
-        {
+        match sync_list_blobs_impl(client, session, did, cursor.clone(), Some(500), None).await {
             Ok(response) => {
                 if response.success {
                     if let Some(mut batch_cids) = response.cids {

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use js_sys;
 use lru::LruCache;
 use reqwest::Client;
 use std::num::NonZeroUsize;
@@ -7,14 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-#[cfg(target_arch = "wasm32")]
-use js_sys;
-
 use super::errors::ResolveError;
 use super::types::{CachedDnsResponse, CloudflareDoHResponse};
 
 /// Get current time in milliseconds since UNIX epoch (WASM compatible)
-#[cfg(target_arch = "wasm32")]
 fn current_time_millis() -> u64 {
     js_sys::Date::now() as u64
 }
@@ -41,7 +38,7 @@ impl DnsOverHttpsResolver {
         Self {
             http_client: {
                 Client::builder()
-                    .user_agent("atproto-migration-service/1.0")
+                    .user_agent("tektite-cc-atproto-migration-service/1.0")
                     .build()
                     .expect("Failed to create HTTP client")
             },
@@ -61,7 +58,7 @@ impl DnsOverHttpsResolver {
         Self {
             http_client: {
                 Client::builder()
-                    .user_agent("atproto-migration-service/1.0")
+                    .user_agent("tektite-cc-atproto-migration-service/1.0")
                     .build()
                     .expect("Failed to create HTTP client")
             },

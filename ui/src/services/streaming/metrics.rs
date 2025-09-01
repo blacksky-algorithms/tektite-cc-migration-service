@@ -3,28 +3,28 @@
 //! This module provides comprehensive metrics tracking for the streaming migration system,
 //! helping optimize performance and monitor the health of data transfers.
 
-use std::time::{Duration, Instant};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
+use std::time::{Duration, Instant};
 
 /// Comprehensive streaming performance metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamingMetrics {
     /// Data transfer rate in bytes per second
     pub transfer_rate: f64,
-    
+
     /// Chunk processing efficiency (successful_chunks / total_chunks)
     pub chunk_efficiency: f64,
-    
+
     /// Memory usage statistics
     pub memory_stats: MemoryStats,
-    
+
     /// Compression ratio if compression is used (compressed_size / original_size)
     pub compression_ratio: Option<f64>,
-    
+
     /// Network-related metrics
     pub network_stats: NetworkStats,
-    
+
     /// Error tracking
     pub error_stats: ErrorStats,
 }
@@ -34,13 +34,13 @@ pub struct StreamingMetrics {
 pub struct MemoryStats {
     /// Peak memory usage in bytes during streaming
     pub peak_usage_bytes: u64,
-    
+
     /// Current memory usage in bytes
     pub current_usage_bytes: u64,
-    
+
     /// Available memory in bytes (estimated)
     pub available_bytes: u64,
-    
+
     /// Memory pressure indicator (0.0 = no pressure, 1.0 = critical)
     pub pressure_ratio: f64,
 }
@@ -50,16 +50,16 @@ pub struct MemoryStats {
 pub struct NetworkStats {
     /// Average latency per request in milliseconds
     pub avg_latency_ms: f64,
-    
+
     /// Number of retries performed
     pub retry_count: u32,
-    
+
     /// Number of failed requests
     pub failed_requests: u32,
-    
+
     /// Total requests made
     pub total_requests: u32,
-    
+
     /// Network success rate (successful_requests / total_requests)
     pub success_rate: f64,
 }
@@ -69,10 +69,10 @@ pub struct NetworkStats {
 pub struct ErrorStats {
     /// Total errors encountered
     pub total_errors: u32,
-    
+
     /// Errors by category
     pub errors_by_type: HashMap<String, u32>,
-    
+
     /// Recovery success rate
     pub recovery_rate: f64,
 }
@@ -180,7 +180,7 @@ impl MetricsCollector {
     /// Get current memory statistics
     pub fn memory_stats(&self) -> MemoryStats {
         let current_usage = self.memory_samples.last().copied().unwrap_or(0);
-        
+
         // Estimate available memory based on browser constraints
         // This is a rough estimate as real memory info isn't available in WASM
         let estimated_available = estimate_available_memory();
@@ -226,7 +226,7 @@ impl MetricsCollector {
     /// Get error statistics
     pub fn error_stats(&self) -> ErrorStats {
         let total_errors: u32 = self.errors.values().sum();
-        
+
         // Recovery rate = (successful retries) / (total errors)
         // This is a simplified calculation
         let recovery_rate = if total_errors > 0 && self.chunks_successful > 0 {
@@ -245,7 +245,9 @@ impl MetricsCollector {
 
     /// Generate complete metrics snapshot
     pub fn snapshot(&self) -> StreamingMetrics {
-        let compression_ratio = if let (Some(original), Some(compressed)) = (self.original_size, self.compressed_size) {
+        let compression_ratio = if let (Some(original), Some(compressed)) =
+            (self.original_size, self.compressed_size)
+        {
             if original > 0 {
                 Some(compressed as f64 / original as f64)
             } else {
@@ -354,11 +356,11 @@ mod tests {
     #[test]
     fn test_metrics_collector_basic() {
         let mut collector = MetricsCollector::new();
-        
+
         collector.record_bytes_transferred(1024);
         collector.record_chunk_success();
         collector.record_memory_usage(512 * 1024);
-        
+
         let metrics = collector.snapshot();
         assert!(metrics.transfer_rate > 0.0);
         assert_eq!(metrics.chunk_efficiency, 1.0);
@@ -368,11 +370,11 @@ mod tests {
     #[test]
     fn test_chunk_efficiency_calculation() {
         let mut collector = MetricsCollector::new();
-        
+
         collector.record_chunk_success();
         collector.record_chunk_success();
         collector.record_chunk_failure();
-        
+
         let efficiency = collector.chunk_efficiency();
         assert!((efficiency - 0.6666666666666666).abs() < 0.0001);
     }

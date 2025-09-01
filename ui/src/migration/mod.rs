@@ -18,7 +18,7 @@
 //!
 //! ```rust
 //! use crate::migration::execute_migration_client_side;
-//! 
+//!
 //! // Execute complete migration with progress tracking
 //! execute_migration_client_side(state, dispatch).await;
 //! ```
@@ -28,7 +28,6 @@ pub mod form_validation;
 pub mod logic;
 pub mod orchestrator;
 pub mod progress;
-pub mod resume_handlers;
 pub mod session_management;
 pub mod steps;
 pub mod storage;
@@ -49,19 +48,22 @@ mod tests {
         // This test will fail to compile if features::migration exists
         // because we would have type conflicts
         use crate::migration::MigrationState;
-        
+
         // If we accidentally reintroduce features::migration, this would cause:
         // "error[E0432]: unresolved import `crate::features::migration::MigrationState`"
         // or "the name `MigrationState` is defined multiple times"
         let _state = MigrationState::default();
     }
 
-    #[test] 
+    #[test]
     fn test_migration_orchestrator_accessible() {
         // Ensure our main orchestrator function is accessible
         use crate::migration::execute_migration_client_side;
-        
+
         // This test ensures the function exists and is accessible
-        assert_eq!(std::any::type_name_of_val(&execute_migration_client_side), "ui::migration::orchestrator::execute_migration_client_side");
+        assert_eq!(
+            std::any::type_name_of_val(&execute_migration_client_side),
+            "ui::migration::orchestrator::execute_migration_client_side"
+        );
     }
 }

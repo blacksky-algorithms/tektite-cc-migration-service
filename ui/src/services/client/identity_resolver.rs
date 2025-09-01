@@ -476,7 +476,7 @@ impl WebIdentityResolver {
             dns_resolver: DnsOverHttpsResolver::new(),
             http_client: {
                 Client::builder()
-                    .user_agent("atproto-migration-service/1.0")
+                    .user_agent("tektite-cc-atproto-migration-service/1.0")
                     .build()
                     .expect("Failed to create HTTP client")
             },

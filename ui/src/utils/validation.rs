@@ -1,6 +1,4 @@
-use crate::migration::{
-    EmailValidation, HandleValidation, MigrationState, PasswordValidation,
-};
+use crate::migration::{EmailValidation, HandleValidation, MigrationState, PasswordValidation};
 
 impl MigrationState {
     pub fn validate_passwords(&self) -> PasswordValidation {

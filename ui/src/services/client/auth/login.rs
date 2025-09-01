@@ -3,9 +3,9 @@ use serde_json::json;
 use tracing::{error, info};
 
 use crate::console_debug;
-use crate::services::client::{ClientError, PdsClient};
 use crate::services::client::session::JwtUtils;
 use crate::services::client::types::*;
+use crate::services::client::{ClientError, PdsClient};
 
 /// Implementation of login functionality
 pub async fn login_impl(
@@ -119,10 +119,13 @@ pub async fn login_impl(
 pub async fn try_login_before_creation_impl(
     client: &PdsClient,
     identifier: &str,
-    password: &str, 
+    password: &str,
     pds_url: &str,
 ) -> Result<ClientLoginResponse, ClientError> {
-    info!("Attempting login before account creation for identifier: {}", identifier);
+    info!(
+        "Attempting login before account creation for identifier: {}",
+        identifier
+    );
 
     // Call ATProto createSession to check if account already exists
     let session_url = format!("{}/xrpc/com.atproto.server.createSession", pds_url);
@@ -146,7 +149,7 @@ pub async fn try_login_before_creation_impl(
 
     if response.status().is_success() {
         // Account exists and login succeeded
-        let session_data: serde_json::Value = 
+        let session_data: serde_json::Value =
             response
                 .json()
                 .await
@@ -209,7 +212,10 @@ pub async fn try_login_before_creation_impl(
                 message: format!("Failed to read error response: {}", e),
             })?;
 
-        error!("Unexpected error during login check - status {}: {}", status, error_text);
+        error!(
+            "Unexpected error during login check - status {}: {}",
+            status, error_text
+        );
         Ok(ClientLoginResponse {
             success: false,
             message: format!("Error checking account existence: {}", error_text),

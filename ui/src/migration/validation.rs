@@ -26,11 +26,12 @@ pub async fn verify_and_complete_blob_migration(
 ) -> Result<(), String> {
     console_info!("[Migration] Starting comprehensive blob migration verification with account status comparison...");
     dispatch.call(MigrationAction::SetMigrationStep(
-        "Verifying blob migration with account status comparison before PLC token step...".to_string(),
+        "Verifying blob migration with account status comparison before PLC token step..."
+            .to_string(),
     ));
 
     let pds_client = PdsClient::new();
-    
+
     // CLAUDE.md Requirement: Check account status for old and new accounts to verify complete blob migration
     console_info!("[Migration] Checking account status on old PDS for baseline comparison...");
     let old_account_status = match pds_client.check_account_status(old_session).await {
@@ -79,17 +80,18 @@ pub async fn verify_and_complete_blob_migration(
             Default::default()
         }
     };
-    
+
     // Compare blob counts between old and new PDSs as specified in CLAUDE.md
     let old_expected = old_account_status.expected_blobs.unwrap_or(0);
     let new_expected = new_account_status.expected_blobs.unwrap_or(0);
     let new_imported = new_account_status.imported_blobs.unwrap_or(0);
-    
+
     if old_expected > 0 && new_expected > 0 {
         if new_expected != new_imported {
             console_warn!(
                 "[Migration] Blob count mismatch detected: {} expected, {} imported on new PDS",
-                new_expected, new_imported
+                new_expected,
+                new_imported
             );
         } else {
             console_info!(
@@ -108,10 +110,7 @@ pub async fn verify_and_complete_blob_migration(
         Ok(response) => {
             if response.success {
                 let blobs = response.missing_blobs.unwrap_or_default();
-                console_info!(
-                    "[Migration] API-reported missing blobs: {}",
-                    blobs.len()
-                );
+                console_info!("[Migration] API-reported missing blobs: {}", blobs.len());
                 blobs
             } else {
                 console_warn!(

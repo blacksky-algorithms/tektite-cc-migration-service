@@ -4,8 +4,7 @@
 use crate::migration::steps::blob::execute_streaming_blob_migration;
 #[cfg(feature = "web")]
 use crate::services::client::{
-    ClientCreateAccountRequest, ClientSessionCredentials, JwtUtils,
-    MigrationClient,
+    ClientCreateAccountRequest, ClientSessionCredentials, JwtUtils, MigrationClient,
 };
 // use reqwest::Client;
 use dioxus::prelude::*;
@@ -14,11 +13,13 @@ use crate::{console_error, console_info, console_warn};
 
 use crate::migration::{
     account_operations::{check_account_status_client_side, create_account_client_side},
-    resume_handlers::{can_resume_migration, get_migration_checkpoint},
     session_management::convert_to_api_session,
-    steps::{plc::setup_plc_transition_client_side, preferences::migrate_preferences_client_side, repository::migrate_repository_client_side}, 
+    steps::{
+        plc::setup_plc_transition_client_side, preferences::migrate_preferences_client_side,
+        repository::migrate_repository_client_side,
+    },
     storage::LocalStorageManager,
-    types::{MigrationAction, MigrationState, MigrationCheckpoint},
+    types::{MigrationAction, MigrationState},
     validation::verify_and_complete_blob_migration,
 };
 // blob_opfs_storage::OpfsBlobManager, blob_storage::create_blob_manager,
@@ -182,177 +183,31 @@ pub async fn execute_migration_client_side(
     let new_session = match login_result {
         Ok(login_response) => {
             if login_response.success && login_response.session.is_some() {
-                // Account already exists - check if we can resume migration
-                console_info!("[Migration] Account already exists. Checking migration progress...");
+                // Account already exists - proceed with migration anyway as per CLAUDE.md
+                console_info!("[Migration] Account already exists. Proceeding with migration...");
                 dispatch.call(MigrationAction::SetMigrationStep(
-                    "Account already exists. Checking migration progress...".to_string(),
+                    "Account already exists. Proceeding with migration...".to_string(),
                 ));
 
                 let existing_session = login_response.session.unwrap();
 
-                // Check if migration can be resumed
-                match can_resume_migration(&existing_session).await {
-                    Ok(true) => {
-                        // Migration can be resumed - determine checkpoint
-                        console_info!("[Migration] Migration can be resumed from existing account");
-                        match get_migration_checkpoint(&existing_session).await {
-                            Ok(checkpoint) => {
-                                let checkpoint_name = match checkpoint {
-                                    MigrationCheckpoint::AccountCreated => "AccountCreated",
-                                    MigrationCheckpoint::RepoMigrated => "RepoMigrated",
-                                    MigrationCheckpoint::BlobsMigrated => "BlobsMigrated",
-                                    MigrationCheckpoint::PreferencesMigrated => {
-                                        "PreferencesMigrated"
-                                    }
-                                    MigrationCheckpoint::PlcReady => "PlcReady",
-                                };
-                                console_info!(
-                                    "{}",
-                                    format!(
-                                        "[Migration] Resuming from checkpoint: {}",
-                                        checkpoint_name
-                                    )
-                                );
-
-                                // Store the existing session and resume from appropriate step
-                                if let Err(error) = LocalStorageManager::store_client_session_as_new(
-                                    &existing_session,
-                                ) {
-                                    console_warn!(
-                                        "{}",
-                                        format!(
-                                            "[Migration] Failed to store existing session: {}",
-                                            error.to_string()
-                                        )
-                                    );
-                                }
-                                dispatch.call(MigrationAction::SetNewPdsSession(Some(
-                                    convert_to_api_session(&existing_session),
-                                )));
-
-                                // Resume migration from appropriate checkpoint
-                                let resume_result = match checkpoint {
-                                    MigrationCheckpoint::AccountCreated => {
-                                        dispatch.call(MigrationAction::SetMigrationStep(
-                                            "⟳ Resuming from repository migration...".to_string(),
-                                        ));
-                                        resume_from_repo_migration(
-                                            &old_session,
-                                            &existing_session,
-                                            &dispatch,
-                                            &state,
-                                        )
-                                        .await
-                                    }
-                                    MigrationCheckpoint::RepoMigrated => {
-                                        dispatch.call(MigrationAction::SetMigrationStep(
-                                            "⟳ Resuming from blob migration...".to_string(),
-                                        ));
-                                        resume_from_blob_migration(
-                                            &old_session,
-                                            &existing_session,
-                                            &dispatch,
-                                            &state,
-                                        )
-                                        .await
-                                    }
-                                    MigrationCheckpoint::BlobsMigrated => {
-                                        dispatch.call(MigrationAction::SetMigrationStep(
-                                            "⟳ Resuming from preferences migration...".to_string(),
-                                        ));
-                                        resume_from_preferences_migration(
-                                            &old_session,
-                                            &existing_session,
-                                            &dispatch,
-                                            &state,
-                                        )
-                                        .await
-                                    }
-                                    MigrationCheckpoint::PreferencesMigrated => {
-                                        dispatch.call(MigrationAction::SetMigrationStep(
-                                            "⟳ Resuming from PLC operations...".to_string(),
-                                        ));
-                                        resume_from_plc_operations(
-                                            &old_session,
-                                            &existing_session,
-                                            &dispatch,
-                                            &state,
-                                        )
-                                        .await
-                                    }
-                                    MigrationCheckpoint::PlcReady => {
-                                        dispatch.call(MigrationAction::SetMigrationStep(
-                                            "⟳ Resuming from PLC operations...".to_string(),
-                                        ));
-                                        resume_from_plc_operations(
-                                            &old_session,
-                                            &existing_session,
-                                            &dispatch,
-                                            &state,
-                                        )
-                                        .await
-                                    }
-                                };
-
-                                match resume_result {
-                                    Ok(_) => {
-                                        console_info!("[Migration] Migration resumed successfully");
-                                        dispatch.call(MigrationAction::SetMigrating(false));
-                                    }
-                                    Err(error) => {
-                                        console_error!(
-                                            "{}",
-                                            format!(
-                                                "[Migration] Failed to resume migration: {}",
-                                                error.clone()
-                                            )
-                                        );
-                                        dispatch
-                                            .call(MigrationAction::SetMigrationError(Some(error)));
-                                        dispatch.call(MigrationAction::SetMigrating(false));
-                                    }
-                                }
-                                return;
-                            }
-                            Err(error) => {
-                                console_error!(
-                                    "{}",
-                                    format!(
-                                        "[Migration] Failed to determine checkpoint: {}",
-                                        error.clone()
-                                    )
-                                );
-                                dispatch.call(MigrationAction::SetMigrationError(Some(format!(
-                                    "Failed to determine resumption point: {}",
-                                    error
-                                ))));
-                                dispatch.call(MigrationAction::SetMigrating(false));
-                                return;
-                            }
-                        }
-                    }
-                    Ok(false) => {
-                        console_error!("[Migration] Account exists but migration cannot be resumed (account may be activated)");
-                        dispatch.call(MigrationAction::SetMigrationError(Some("Account already exists and cannot be used for migration. The account may already be activated.".to_string())));
-                        dispatch.call(MigrationAction::SetMigrating(false));
-                        return;
-                    }
-                    Err(error) => {
-                        console_error!(
-                            "{}",
-                            format!(
-                                "[Migration] Failed to check resumption status: {}",
-                                error.clone()
-                            )
-                        );
-                        dispatch.call(MigrationAction::SetMigrationError(Some(format!(
-                            "Failed to check if migration can be resumed: {}",
-                            error
-                        ))));
-                        dispatch.call(MigrationAction::SetMigrating(false));
-                        return;
-                    }
+                // Store the existing session for use in migration
+                if let Err(error) =
+                    LocalStorageManager::store_client_session_as_new(&existing_session)
+                {
+                    console_warn!(
+                        "{}",
+                        format!(
+                            "[Migration] Failed to store existing session: {}",
+                            error.to_string()
+                        )
+                    );
                 }
+                dispatch.call(MigrationAction::SetNewPdsSession(Some(
+                    convert_to_api_session(&existing_session),
+                )));
+
+                existing_session
             } else {
                 // Account doesn't exist, proceed with creation
                 console_info!(
@@ -461,8 +316,7 @@ pub async fn execute_migration_client_side(
     console_info!("[Migration] Starting Phase 2: Content and Identity Migration");
 
     // Execute repository migration
-    if let Err(error) =
-        migrate_repository_client_side(&old_session, &new_session, &dispatch).await
+    if let Err(error) = migrate_repository_client_side(&old_session, &new_session, &dispatch).await
     {
         dispatch.call(MigrationAction::SetMigrationError(Some(error)));
         dispatch.call(MigrationAction::SetMigrating(false));
@@ -505,10 +359,12 @@ pub async fn execute_migration_client_side(
         return;
     }
 
-    console_info!("[Migration] Client-side migration completed successfully");
+    console_info!(
+        "[MILESTONE] Client-side migration data phase completed successfully - timestamp: {}",
+        js_sys::Date::now()
+    );
+    console_info!("[Migration] ⚠️  Migration continues with PLC operations in Form4 - NOT setting is_migrating=false yet");
 }
-
-
 
 /// Request a service auth token from the old PDS for migration
 #[cfg(feature = "web")]
@@ -562,118 +418,3 @@ async fn request_service_auth_token(
         }
     }
 }
-
-
-
-
-/// Resume migration from repository migration step
-#[cfg(feature = "web")]
-async fn resume_from_repo_migration(
-    old_session: &ClientSessionCredentials,
-    new_session: &ClientSessionCredentials,
-    dispatch: &EventHandler<MigrationAction>,
-    state: &MigrationState,
-) -> Result<(), String> {
-    console_info!("[Migration] Resuming from repository migration - continuing full chain");
-    dispatch.call(MigrationAction::SetMigrationStep(
-        "Resuming migration from repository step...".to_string(),
-    ));
-
-    // Execute repository migration
-    migrate_repository_client_side(old_session, new_session, dispatch).await?;
-
-    // Continue with blob migration using streaming architecture
-    execute_streaming_blob_migration(old_session, new_session, dispatch, state).await?;
-
-    // Verify blob migration completion and automatically retry missing blobs
-    verify_and_complete_blob_migration(old_session, new_session, dispatch, state).await?;
-
-    // Continue with preferences migration
-    migrate_preferences_client_side(old_session, new_session, dispatch, state).await?;
-
-    // Continue with PLC setup (this sends the email for Form 4)
-    setup_plc_transition_client_side(old_session, new_session, dispatch, state).await?;
-
-    console_info!("[Migration] Repository migration resumption completed full chain");
-    Ok(())
-}
-
-/// Resume migration from blob migration step  
-#[cfg(feature = "web")]
-async fn resume_from_blob_migration(
-    old_session: &ClientSessionCredentials,
-    new_session: &ClientSessionCredentials,
-    dispatch: &EventHandler<MigrationAction>,
-    state: &MigrationState,
-) -> Result<(), String> {
-    console_info!("[Migration] Resuming from blob migration - continuing to preferences and PLC");
-    dispatch.call(MigrationAction::SetMigrationStep(
-        "Resuming migration from blob step...".to_string(),
-    ));
-
-    // Execute blob migration using streaming architecture
-    execute_streaming_blob_migration(old_session, new_session, dispatch, state).await?;
-
-    // Verify blob migration completion and automatically retry missing blobs
-    verify_and_complete_blob_migration(old_session, new_session, dispatch, state).await?;
-
-    // Continue with preferences migration
-    migrate_preferences_client_side(old_session, new_session, dispatch, state).await?;
-
-    // Continue with PLC setup (this sends the email for Form 4)
-    setup_plc_transition_client_side(old_session, new_session, dispatch, state).await?;
-
-    console_info!("[Migration] Blob migration resumption completed full chain");
-    Ok(())
-}
-
-/// Resume migration from preferences migration step
-#[cfg(feature = "web")]
-async fn resume_from_preferences_migration(
-    old_session: &ClientSessionCredentials,
-    new_session: &ClientSessionCredentials,
-    dispatch: &EventHandler<MigrationAction>,
-    state: &MigrationState,
-) -> Result<(), String> {
-    console_info!("[Migration] Resuming from preferences migration - continuing to PLC");
-    dispatch.call(MigrationAction::SetMigrationStep(
-        "Resuming migration from preferences step...".to_string(),
-    ));
-
-    // Verify blob migration completion and automatically retry missing blobs (in case blobs were missed)
-    verify_and_complete_blob_migration(old_session, new_session, dispatch, state).await?;
-
-    // Execute preferences migration
-    migrate_preferences_client_side(old_session, new_session, dispatch, state).await?;
-
-    // Continue with PLC setup (this sends the email for Form 4)
-    setup_plc_transition_client_side(old_session, new_session, dispatch, state).await?;
-
-    console_info!("[Migration] Preferences migration resumption completed full chain");
-    Ok(())
-}
-
-/// Resume migration from PLC operations step
-#[cfg(feature = "web")]
-async fn resume_from_plc_operations(
-    old_session: &ClientSessionCredentials,
-    new_session: &ClientSessionCredentials,
-    dispatch: &EventHandler<MigrationAction>,
-    state: &MigrationState,
-) -> Result<(), String> {
-    console_info!("[Migration] Resuming from PLC operations - final step");
-    dispatch.call(MigrationAction::SetMigrationStep(
-        "Resuming migration from PLC step...".to_string(),
-    ));
-
-    // Verify blob migration completion and automatically retry missing blobs (final verification before PLC)
-    verify_and_complete_blob_migration(old_session, new_session, dispatch, state).await?;
-
-    // Execute PLC setup (this sends the email for Form 4)
-    setup_plc_transition_client_side(old_session, new_session, dispatch, state).await?;
-
-    console_info!("[Migration] PLC operations resumption completed");
-    Ok(())
-}
-
-

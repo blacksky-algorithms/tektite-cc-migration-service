@@ -16,7 +16,7 @@ This approach minimizes memory usage while maximizing throughput by avoiding the
 - **`DataTarget`** - Trait for uploading data to target PDS
 - **`StorageBackend`** - Trait for browser storage operations
 - **`BrowserStream`** - WASM-compatible stream wrapper using ReadableStreamDefaultReader
-- **`ChannelTee`** - Channel-based data duplication for simultaneous operations
+- **`ChannelTee<const CAPACITY>`** - Memory-optimized channel-based data duplication with compile-time capacity
 - **`DataChunk`** - Generic data container with metadata
 
 ### `orchestrator.rs` - Coordination Logic
@@ -73,7 +73,7 @@ This approach minimizes memory usage while maximizing throughput by avoiding the
 ```rust
 use crate::services::streaming::*;
 
-// Create orchestrator
+// Create orchestrator with const generic channel capacity
 let orchestrator = SyncOrchestrator::new();
 
 // Set up source, target, and storage
@@ -81,7 +81,7 @@ let source = RepoSource::new(&old_session);
 let target = RepoTarget::new(&new_session);  
 let storage = BufferedStorage::new("repos/did:example:123".to_string()).await?;
 
-// Execute streaming migration with channel-tee
+// Execute streaming migration with memory-optimized channel-tee (64 capacity)
 let result = orchestrator.sync_with_tee(source, target, storage).await?;
 
 println!("Migrated {} bytes successfully", result.total_bytes_processed);
@@ -90,9 +90,9 @@ println!("Migrated {} bytes successfully", result.total_bytes_processed);
 ## Data Flow
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│ Source PDS  │───►│ BrowserStream│───►│ ChannelTee  │
-└─────────────┘    └──────────────┘    └─────┬───────┘
+┌─────────────┐    ┌──────────────┐    ┌─────────────────────┐
+│ Source PDS  │───►│ BrowserStream│───►│ ChannelTee<64>      │
+└─────────────┘    └──────────────┘    └─────┬───────────────┘
                                              │
                         ┌────────────────────┼────────────────────┐
                         ▼                    ▼                    ▼
@@ -106,10 +106,12 @@ println!("Migrated {} bytes successfully", result.total_bytes_processed);
 
 ## Performance Characteristics
 
-- **Memory Efficient**: Streams data in configurable chunks (default 256KB for browser)
-- **Concurrent Operations**: Storage and upload happen simultaneously
+- **Memory Optimized**: Const generic channel capacity (64 items) for predictable memory usage
+- **Concurrent Operations**: Storage and upload happen simultaneously via channel-tee pattern
+- **WASM-Friendly**: Compile-time allocations eliminate runtime capacity decisions
 - **Browser Optimized**: Uses OPFS for fast storage when available
 - **Fallback Support**: Graceful degradation to IndexedDB when OPFS unavailable
+- **Unified Behavior**: Consistent memory usage across all browser environments
 - **Progress Tracking**: Built-in progress reporting for UI integration
 - **Performance Monitoring**: Real-time metrics collection for transfer rates, memory usage, and error tracking
 - **Smart Error Recovery**: Automatic recovery strategies based on error type and network conditions

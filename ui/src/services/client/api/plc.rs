@@ -92,8 +92,7 @@ pub async fn request_plc_token_impl(
 
         Ok(ClientPlcTokenResponse {
             success: true,
-            message: "PLC token sent to email. Check your email for verification code."
-                .to_string(),
+            message: "PLC token sent to email. Check your email for verification code.".to_string(),
         })
     } else {
         let error_text = response.text().await.unwrap_or_default();

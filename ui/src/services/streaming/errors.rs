@@ -3,13 +3,15 @@
 //! This module provides comprehensive error handling for streaming operations,
 //! with detailed error information to help with diagnostics and recovery.
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
 
 /// Comprehensive streaming errors with detailed context
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
 pub enum StreamingError {
-    #[error("Chunk transfer failed: {chunk_id} after {retry_count} retries (last error: {last_error})")]
+    #[error(
+        "Chunk transfer failed: {chunk_id} after {retry_count} retries (last error: {last_error})"
+    )]
     ChunkTransferFailed {
         chunk_id: String,
         retry_count: u32,
@@ -64,7 +66,9 @@ pub enum StreamingError {
         resumable: bool,
     },
 
-    #[error("Concurrent limit exceeded: {active_streams} active streams, limit is {max_concurrent}")]
+    #[error(
+        "Concurrent limit exceeded: {active_streams} active streams, limit is {max_concurrent}"
+    )]
     ConcurrentLimitExceeded {
         active_streams: u32,
         max_concurrent: u32,
@@ -179,8 +183,11 @@ impl RecoverableStreamingError {
         matches!(
             self.error,
             StreamingError::NetworkTimeout { .. }
-            | StreamingError::StreamInterrupted { resumable: true, .. }
-            | StreamingError::ChunkTransferFailed { .. }
+                | StreamingError::StreamInterrupted {
+                    resumable: true,
+                    ..
+                }
+                | StreamingError::ChunkTransferFailed { .. }
         )
     }
 
@@ -189,7 +196,10 @@ impl RecoverableStreamingError {
         match &self.error {
             StreamingError::DataIntegrityFailed { .. } => ErrorSeverity::Critical,
             StreamingError::StorageQuotaExceeded { .. } => ErrorSeverity::Critical,
-            StreamingError::BrowserApiUnavailable { fallback_available: false, .. } => ErrorSeverity::Critical,
+            StreamingError::BrowserApiUnavailable {
+                fallback_available: false,
+                ..
+            } => ErrorSeverity::Critical,
             StreamingError::MemoryPressure { pressure_ratio, .. } => {
                 if *pressure_ratio > 0.9 {
                     ErrorSeverity::Critical
@@ -221,7 +231,10 @@ pub enum ErrorSeverity {
 }
 
 /// Suggest appropriate recovery strategies based on error type and context
-fn suggest_recovery_strategies(error: &StreamingError, context: &ErrorContext) -> Vec<RecoveryStrategy> {
+fn suggest_recovery_strategies(
+    error: &StreamingError,
+    context: &ErrorContext,
+) -> Vec<RecoveryStrategy> {
     let mut strategies = Vec::new();
 
     match error {
@@ -233,10 +246,10 @@ fn suggest_recovery_strategies(error: &StreamingError, context: &ErrorContext) -
                     backoff_multiplier: 2.0,
                 });
             }
-            
+
             if context.network_conditions.effective_type.as_deref() == Some("slow-2g") {
                 strategies.push(RecoveryStrategy::ReduceChunkSize {
-                    current_size: 256 * 1024, // Assume 256KB default
+                    current_size: 256 * 1024,  // Assume 256KB default
                     suggested_size: 64 * 1024, // Reduce to 64KB
                 });
             }
@@ -247,7 +260,7 @@ fn suggest_recovery_strategies(error: &StreamingError, context: &ErrorContext) -
                 current_size: 256 * 1024,
                 suggested_size: 64 * 1024,
             });
-            
+
             strategies.push(RecoveryStrategy::ReduceConcurrency {
                 current: 4,
                 suggested: 1,
@@ -264,7 +277,7 @@ fn suggest_recovery_strategies(error: &StreamingError, context: &ErrorContext) -
                 algorithm: "lz4".to_string(),
                 expected_ratio: 0.6,
             });
-            
+
             strategies.push(RecoveryStrategy::RequestUserAction {
                 action: "Clear browser storage".to_string(),
                 reason: "Storage quota exceeded".to_string(),
@@ -286,7 +299,10 @@ fn suggest_recovery_strategies(error: &StreamingError, context: &ErrorContext) -
             });
         }
 
-        StreamingError::BrowserApiUnavailable { fallback_available: true, .. } => {
+        StreamingError::BrowserApiUnavailable {
+            fallback_available: true,
+            ..
+        } => {
             strategies.push(RecoveryStrategy::SwitchToFallbackStorage);
         }
 

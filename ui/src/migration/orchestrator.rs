@@ -8,10 +8,8 @@ use dioxus::prelude::*;
 
 use crate::migration::{
     steps::{
-        blob::execute_streaming_blob_migration, 
-        plc::setup_plc_transition_client_side,
-        preferences::migrate_preferences_client_side, 
-        repository::migrate_repository_client_side,
+        blob::execute_streaming_blob_migration, plc::setup_plc_transition_client_side,
+        preferences::migrate_preferences_client_side, repository::migrate_repository_client_side,
     },
     storage::LocalStorageManager,
     types::*,
@@ -75,7 +73,6 @@ pub async fn execute_migration_client_side(
     dispatch.call(MigrationAction::SetMigrationCompleted(true));
 }
 
-
 async fn execute_full_migration(
     state: &MigrationState,
     dispatch: &EventHandler<MigrationAction>,
@@ -84,7 +81,7 @@ async fn execute_full_migration(
 ) -> Result<(), String> {
     // Get configuration to determine architecture choice
     let config = get_global_config();
-    
+
     console_info!(
         "[Migration] Using {} architecture for migration",
         match config.architecture {
@@ -118,7 +115,7 @@ async fn execute_full_migration(
     console_info!("[Migration] Phase 4: Account and Blob Verification");
     let max_retries = 3;
     let mut retry_count = 0;
-    
+
     while retry_count < max_retries {
         match verify_migration_completeness(old_session, new_session).await {
             Ok(true) => {
@@ -127,33 +124,54 @@ async fn execute_full_migration(
             }
             Ok(false) => {
                 retry_count += 1;
-                console_warn!("[Migration] Verification failed, attempt {}/{}", retry_count, max_retries);
-                
+                console_warn!(
+                    "[Migration] Verification failed, attempt {}/{}",
+                    retry_count,
+                    max_retries
+                );
+
                 if retry_count < max_retries {
                     console_info!("[Migration] Retrying repository and blob migration...");
-                    
+
                     // Retry repository migration
-                    if let Err(e) = migrate_repository_client_side(old_session, new_session, dispatch).await {
+                    if let Err(e) =
+                        migrate_repository_client_side(old_session, new_session, dispatch).await
+                    {
                         console_error!("[Migration] Repository retry failed: {}", e);
                         continue;
                     }
-                    
+
                     // Retry blob migration based on configuration
                     let retry_result = match config.architecture {
                         crate::services::config::MigrationArchitecture::Traditional => {
-                            execute_streaming_blob_migration(old_session, new_session, dispatch, state).await
+                            execute_streaming_blob_migration(
+                                old_session,
+                                new_session,
+                                dispatch,
+                                state,
+                            )
+                            .await
                         }
                         crate::services::config::MigrationArchitecture::Streaming => {
-                            execute_streaming_blob_migration(old_session, new_session, dispatch, state).await
+                            execute_streaming_blob_migration(
+                                old_session,
+                                new_session,
+                                dispatch,
+                                state,
+                            )
+                            .await
                         }
                     };
-                    
+
                     if let Err(e) = retry_result {
                         console_error!("[Migration] Blob migration retry failed: {}", e);
                         continue;
                     }
                 } else {
-                    return Err(format!("Migration verification failed after {} attempts", max_retries));
+                    return Err(format!(
+                        "Migration verification failed after {} attempts",
+                        max_retries
+                    ));
                 }
             }
             Err(e) => {
@@ -189,13 +207,16 @@ async fn verify_migration_completeness(
     new_session: &ClientSessionCredentials,
 ) -> Result<bool, String> {
     let client = crate::services::client::PdsClient::new();
-    
+
     // Check if there are any missing blobs on new PDS
     match client.get_missing_blobs(new_session, None, None).await {
         Ok(response) => {
             let missing_count = response.missing_blobs.unwrap_or_default().len();
             if missing_count > 0 {
-                console_warn!("[Migration] Found {} missing blobs on target PDS", missing_count);
+                console_warn!(
+                    "[Migration] Found {} missing blobs on target PDS",
+                    missing_count
+                );
                 return Ok(false);
             }
         }
@@ -204,7 +225,7 @@ async fn verify_migration_completeness(
             return Err(format!("Failed to verify blob migration: {}", e));
         }
     }
-    
+
     // Check account status on both PDSs
     // TODO: Add account status verification
     console_info!("[Migration] Account and blob verification completed successfully");

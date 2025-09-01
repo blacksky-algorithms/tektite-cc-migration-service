@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 use crate::components::{
     display::BlobProgressDisplay,
+    forms::DomainSelector,
     inputs::{
         EmailValidationFeedback, HandleValidationFeedback, InputType, PasswordValidationFeedback,
         ValidatedInput,
@@ -27,6 +28,9 @@ use crate::migration::logic::execute_migration_client_side;
 #[cfg(not(feature = "web"))]
 use crate::migration::logic::execute_migration;
 
+// Import console macros
+use crate::{console_debug, console_info};
+
 #[derive(Props, PartialEq, Clone)]
 pub struct MigrationDetailsFormProps {
     pub state: Signal<MigrationState>,
@@ -37,6 +41,89 @@ pub struct MigrationDetailsFormProps {
 pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
     let state = props.state;
     let dispatch = props.dispatch;
+
+    // Fetch original PDS describe info on mount if not already cached
+    #[cfg(feature = "web")]
+    use_effect(move || {
+        let current_state = state();
+
+        // Only fetch if we don't have cached original PDS describe response
+        if current_state.original_pds_describe.is_none()
+            && !current_state.form1.original_handle.is_empty()
+        {
+            let dispatch_copy = dispatch;
+            spawn(async move {
+                // Just trigger the async function to cache the result
+                let _placeholder = current_state
+                    .get_handle_prefix_placeholder_async(Some(dispatch_copy))
+                    .await;
+            });
+        }
+    });
+
+    // Handle migration completion cleanup - track specific dependencies to avoid infinite loop
+    let is_migrating = use_memo(move || state().is_migrating);
+    let migration_completed = use_memo(move || state().migration_completed);
+
+    use_effect(move || {
+        let is_migrating_val = is_migrating();
+        let migration_completed_val = migration_completed();
+
+        let should_reset = !is_migrating_val && migration_completed_val;
+
+        console_debug!("[HOOK] use_effect triggered: is_migrating={}, migration_completed={}, will_reset_blob_progress={} - timestamp: {}", 
+            is_migrating_val, migration_completed_val, should_reset, js_sys::Date::now());
+
+        // When migration completes, ensure blob progress is cleared to prevent UI freeze
+        if should_reset {
+            console_info!("[HOOK] Resetting blob progress due to migration completion");
+            dispatch.call(MigrationAction::SetBlobProgress(BlobProgress::default()));
+        }
+    });
+
+    // Extract handle validation logic into a reusable function
+    let validate_handle_availability =
+        move |full_handle: String, dispatch: EventHandler<MigrationAction>| {
+            // Validate handle availability if handle is not empty
+            if !full_handle.trim().is_empty() {
+                dispatch.call(MigrationAction::SetHandleValidation(
+                    HandleValidation::Checking,
+                ));
+                dispatch.call(MigrationAction::SetCheckingHandle(true));
+
+                #[cfg(feature = "web")]
+                spawn(async move {
+                    let identity_resolver = WebIdentityResolver::new();
+                    match identity_resolver.resolve_handle(&full_handle).await {
+                        Ok(_did) => {
+                            // Handle resolves to a DID - it's unavailable (taken)
+                            dispatch.call(MigrationAction::SetHandleValidation(
+                                HandleValidation::Unavailable,
+                            ));
+                        }
+                        Err(_) => {
+                            // Handle doesn't resolve - it's available (not taken)
+                            dispatch.call(MigrationAction::SetHandleValidation(
+                                HandleValidation::Available,
+                            ));
+                        }
+                    }
+                    dispatch.call(MigrationAction::SetCheckingHandle(false));
+                });
+
+                #[cfg(not(feature = "web"))]
+                spawn(async move {
+                    // Fallback for when client-side migration is disabled
+                    dispatch.call(MigrationAction::SetHandleValidation(
+                        HandleValidation::Error,
+                    ));
+                    dispatch.call(MigrationAction::SetCheckingHandle(false));
+                });
+            } else {
+                dispatch.call(MigrationAction::SetHandleValidation(HandleValidation::None));
+                dispatch.call(MigrationAction::SetCheckingHandle(false));
+            }
+        };
 
     rsx! {
         div {
@@ -75,48 +162,35 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
                         input_style: validation_style(&state().validations.handle).to_string(),
                         disabled: state().is_migrating || state().current_step == FormStep::PlcVerification,
                         on_change: move |prefix_value: String| {
-                            // Combine prefix with domain suffix to create full handle
+                            // Combine prefix with selected domain suffix
                             let domain_suffix = state().get_domain_suffix();
                             let full_handle = format!("{}{}", prefix_value, domain_suffix);
 
                             dispatch.call(MigrationAction::SetNewHandle(full_handle.clone()));
 
-                            // Validate handle availability if prefix is not empty
-                            if !prefix_value.trim().is_empty() {
-                                dispatch.call(MigrationAction::SetHandleValidation(HandleValidation::Checking));
-                                dispatch.call(MigrationAction::SetCheckingHandle(true));
-
-                                #[cfg(feature = "web")]
-                                spawn(async move {
-                                    let identity_resolver = WebIdentityResolver::new();
-                                    match identity_resolver.resolve_handle(&full_handle).await {
-                                        Ok(_did) => {
-                                            // Handle resolves to a DID - it's unavailable (taken)
-                                            dispatch.call(MigrationAction::SetHandleValidation(HandleValidation::Unavailable));
-                                        }
-                                        Err(_) => {
-                                            // Handle doesn't resolve - it's available (not taken)
-                                            dispatch.call(MigrationAction::SetHandleValidation(HandleValidation::Available));
-                                        }
-                                    }
-                                    dispatch.call(MigrationAction::SetCheckingHandle(false));
-                                });
-
-                                #[cfg(not(feature = "web"))]
-                                spawn(async move {
-                                    // Fallback for when client-side migration is disabled
-                                    dispatch.call(MigrationAction::SetHandleValidation(HandleValidation::Error));
-                                    dispatch.call(MigrationAction::SetCheckingHandle(false));
-                                });
-                            } else {
-                                dispatch.call(MigrationAction::SetHandleValidation(HandleValidation::None));
-                                dispatch.call(MigrationAction::SetCheckingHandle(false));
-                            }
+                            // Use the extracted validation function
+                            validate_handle_availability(full_handle, dispatch);
                         }
                     }
-                    span {
-                        class: "handle-domain-suffix",
-                        "{state().get_domain_suffix()}"
+
+                    // Domain selector component
+                    DomainSelector {
+                        domains: state().get_available_domains(),
+                        selected_domain: state().get_domain_suffix(),
+                        disabled: state().is_migrating || state().current_step == FormStep::PlcVerification,
+                        on_change: move |new_domain: String| {
+                            dispatch.call(MigrationAction::SetSelectedDomain(new_domain.clone()));
+
+                            // Update the handle with new domain when domain changes
+                            let prefix = state().get_handle_prefix_raw();
+                            if !prefix.is_empty() {
+                                let full_handle = format!("{}{}", prefix, new_domain);
+                                dispatch.call(MigrationAction::SetNewHandle(full_handle.clone()));
+
+                                // Validate the new handle with the selected domain
+                                validate_handle_availability(full_handle, dispatch);
+                            }
+                        }
                     }
                 }
 
@@ -249,11 +323,26 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
                         class: "migration-progress",
                         "{state().migration_step}"
 
-                        // Show detailed blob progress if blob migration is in progress
-                        if state().blob_progress.total_blobs > 0 && state().migration_step.contains("blob") {
-                            BlobProgressDisplay {
-                                blob_progress: state().blob_progress.clone(),
-                                migration_step: state().migration_step.clone()
+                        // Show detailed blob progress using centralized logic
+                        {
+                            let current_state = state();
+                            let should_show = current_state.should_show_blob_progress();
+                            crate::console_info!("[UI] migration_details_form evaluating BlobProgressDisplay: should_show={}, is_migrating={}, migration_completed={}",
+                                should_show, current_state.is_migrating, current_state.migration_completed);
+
+                            if should_show {
+                                let blob_progress = current_state.unified_blob_progress();
+                                let migration_step = current_state.migration_step.clone();
+                                crate::console_info!("[UI] Rendering BlobProgressDisplay with step='{}'", migration_step);
+                                rsx! {
+                                    BlobProgressDisplay {
+                                        blob_progress,
+                                        migration_step,
+                                    }
+                                }
+                            } else {
+                                crate::console_info!("[UI] NOT rendering BlobProgressDisplay - conditions not met");
+                                rsx! {}
                             }
                         }
                     }

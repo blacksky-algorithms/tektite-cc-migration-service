@@ -4,9 +4,26 @@
 //! across different storage backends. It intelligently divides large blobs into
 //! optimally-sized chunks based on backend capabilities and WASM memory constraints.
 
-use crate::utils::platform::{detect_browser, BrowserType};
 use crate::{console_debug, console_error, console_info};
 use serde::{Deserialize, Serialize};
+
+// Conservative chunk size constants based on Safari's proven limits
+// Applied universally across all browsers for consistent behavior
+
+// OPFS unified limits (Safari conservative)
+const OPFS_MAX: usize = 50 * 1024 * 1024; // 50MB
+const OPFS_OPTIMAL: usize = 25 * 1024 * 1024; // 25MB
+const OPFS_MIN: usize = 5 * 1024 * 1024; // 5MB
+
+// IndexedDB unified limits (Safari conservative)
+const IDB_MAX: usize = 25 * 1024 * 1024; // 25MB
+const IDB_OPTIMAL: usize = 10 * 1024 * 1024; // 10MB
+const IDB_MIN: usize = 2 * 1024 * 1024; // 2MB
+
+// LocalStorage limits (already very conservative)
+const LS_MAX: usize = 1024 * 1024; // 1MB
+const LS_OPTIMAL: usize = 512 * 1024; // 512KB
+const LS_MIN: usize = 256 * 1024; // 256KB
 
 /// Chunk metadata for tracking blob pieces
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,122 +47,140 @@ pub struct ChunkedBlobInfo {
     pub created_at: u64,
 }
 
-/// Chunking strategy configuration based on backend capabilities
+/// Chunking strategy configuration with const generic chunk sizes
 #[derive(Debug, Clone)]
-pub struct ChunkingConfig {
-    pub max_chunk_size: u64,
-    pub optimal_chunk_size: u64,
-    pub min_chunk_size: u64,
+pub struct ChunkingConfig<const OPTIMAL_SIZE: usize, const MAX_SIZE: usize, const MIN_SIZE: usize> {
     pub backend_name: String,
 }
 
-impl ChunkingConfig {
-    /// Get optimal chunking configuration for a given storage backend with browser-specific adjustments
-    pub fn for_backend(backend_name: &str) -> Self {
-        let browser = detect_browser();
+// Type aliases for specific backend configurations
+pub type OpfsChunkingConfig = ChunkingConfig<OPFS_OPTIMAL, OPFS_MAX, OPFS_MIN>;
+pub type IndexedDbChunkingConfig = ChunkingConfig<IDB_OPTIMAL, IDB_MAX, IDB_MIN>;
+pub type LocalStorageChunkingConfig = ChunkingConfig<LS_OPTIMAL, LS_MAX, LS_MIN>;
 
-        match backend_name {
-            "OPFS" => {
-                // OPFS can handle large chunks, but adjust based on browser capabilities
-                let (max_chunk, optimal_chunk, min_chunk) = match browser {
-                    BrowserType::Chrome => (100 * 1024 * 1024, 50 * 1024 * 1024, 10 * 1024 * 1024), // Chrome handles large chunks well
-                    BrowserType::Firefox => (75 * 1024 * 1024, 30 * 1024 * 1024, 10 * 1024 * 1024), // Firefox with group limits
-                    BrowserType::Safari => (50 * 1024 * 1024, 25 * 1024 * 1024, 5 * 1024 * 1024), // Safari more conservative
-                    BrowserType::Unknown => (50 * 1024 * 1024, 25 * 1024 * 1024, 5 * 1024 * 1024), // Conservative for unknown
-                };
-                ChunkingConfig {
-                    max_chunk_size: max_chunk,
-                    optimal_chunk_size: optimal_chunk,
-                    min_chunk_size: min_chunk,
-                    backend_name: backend_name.to_string(),
-                }
-            }
-            "IndexedDB" => {
-                // IndexedDB transaction limits vary by browser
-                let (max_chunk, optimal_chunk, min_chunk) = match browser {
-                    BrowserType::Chrome => (50 * 1024 * 1024, 20 * 1024 * 1024, 5 * 1024 * 1024), // Chrome generous
-                    BrowserType::Firefox => (30 * 1024 * 1024, 15 * 1024 * 1024, 3 * 1024 * 1024), // Firefox with group limits
-                    BrowserType::Safari => (25 * 1024 * 1024, 10 * 1024 * 1024, 2 * 1024 * 1024), // Safari conservative
-                    BrowserType::Unknown => (20 * 1024 * 1024, 8 * 1024 * 1024, 2 * 1024 * 1024), // Conservative for unknown
-                };
-                ChunkingConfig {
-                    max_chunk_size: max_chunk,
-                    optimal_chunk_size: optimal_chunk,
-                    min_chunk_size: min_chunk,
-                    backend_name: backend_name.to_string(),
-                }
-            }
-            "LocalStorage" => {
-                // LocalStorage is severely limited: 5-10MB total across all origins
-                // Must use very small chunks to fit within constraints
-                ChunkingConfig {
-                    max_chunk_size: 1024 * 1024, // 1MB max - significant reduction from previous 2MB
-                    optimal_chunk_size: 512 * 1024, // 512KB optimal - down from 1MB
-                    min_chunk_size: 256 * 1024,  // 256KB minimum - down from 512KB
-                    backend_name: backend_name.to_string(),
-                }
-            }
-            _ => ChunkingConfig {
-                max_chunk_size: 10 * 1024 * 1024,    // 10MB conservative default
-                optimal_chunk_size: 5 * 1024 * 1024, // 5MB optimal
-                min_chunk_size: 1024 * 1024,         // 1MB minimum
-                backend_name: backend_name.to_string(),
-            },
+impl<const OPTIMAL_SIZE: usize, const MAX_SIZE: usize, const MIN_SIZE: usize>
+    ChunkingConfig<OPTIMAL_SIZE, MAX_SIZE, MIN_SIZE>
+{
+    /// Const generic accessors for chunk sizes
+    pub const fn max_chunk_size(&self) -> u64 {
+        MAX_SIZE as u64
+    }
+
+    pub const fn optimal_chunk_size(&self) -> u64 {
+        OPTIMAL_SIZE as u64
+    }
+
+    pub const fn min_chunk_size(&self) -> u64 {
+        MIN_SIZE as u64
+    }
+}
+
+// Factory methods for specific backend configurations
+impl Default for OpfsChunkingConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OpfsChunkingConfig {
+    pub fn new() -> Self {
+        Self {
+            backend_name: "OPFS".to_string(),
         }
     }
+}
 
-    /// Get browser-aware chunking configuration with available quota consideration
-    pub fn for_backend_with_quota(backend_name: &str, available_quota: Option<u64>) -> Self {
-        let mut config = Self::for_backend(backend_name);
+impl Default for IndexedDbChunkingConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-        if let Some(quota) = available_quota {
-            // Adjust chunk sizes based on available quota
-            // Use no more than 10% of available quota for a single chunk
-            let quota_based_max = quota / 10;
-
-            if config.max_chunk_size > quota_based_max {
-                console_info!("{}", format!(
-                    "📊 [ChunkingConfig] Reducing max chunk size from {:.1}MB to {:.1}MB based on available quota",
-                    config.max_chunk_size as f64 / (1024.0 * 1024.0),
-                    quota_based_max as f64 / (1024.0 * 1024.0)
-                ));
-
-                config.max_chunk_size = quota_based_max;
-                config.optimal_chunk_size =
-                    std::cmp::min(config.optimal_chunk_size, quota_based_max);
-                config.min_chunk_size = std::cmp::min(config.min_chunk_size, quota_based_max);
-            }
+impl IndexedDbChunkingConfig {
+    pub fn new() -> Self {
+        Self {
+            backend_name: "IndexedDB".to_string(),
         }
+    }
+}
 
-        config
+impl Default for LocalStorageChunkingConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LocalStorageChunkingConfig {
+    pub fn new() -> Self {
+        Self {
+            backend_name: "LocalStorage".to_string(),
+        }
+    }
+}
+
+/// Helper function to create appropriate config for backend
+pub fn create_chunking_config(backend_name: &str) -> Box<dyn ChunkingConfigTrait> {
+    match backend_name {
+        "OPFS" => Box::new(OpfsChunkingConfig::new()),
+        "IndexedDB" => Box::new(IndexedDbChunkingConfig::new()),
+        "LocalStorage" => Box::new(LocalStorageChunkingConfig::new()),
+        _ => Box::new(OpfsChunkingConfig::new()), // Default to OPFS
+    }
+}
+
+/// Trait for unified access to chunking config methods
+pub trait ChunkingConfigTrait {
+    fn max_chunk_size(&self) -> u64;
+    fn optimal_chunk_size(&self) -> u64;
+    fn min_chunk_size(&self) -> u64;
+    fn backend_name(&self) -> &str;
+    fn should_chunk_blob(&self, blob_size: u64) -> bool;
+    fn calculate_optimal_chunks(&self, blob_size: u64) -> u32;
+}
+
+impl<const OPTIMAL_SIZE: usize, const MAX_SIZE: usize, const MIN_SIZE: usize> ChunkingConfigTrait
+    for ChunkingConfig<OPTIMAL_SIZE, MAX_SIZE, MIN_SIZE>
+{
+    fn max_chunk_size(&self) -> u64 {
+        MAX_SIZE as u64
     }
 
-    /// Determine if a blob should be chunked based on size
-    pub fn should_chunk_blob(&self, blob_size: u64) -> bool {
-        blob_size > self.optimal_chunk_size
+    fn optimal_chunk_size(&self) -> u64 {
+        OPTIMAL_SIZE as u64
     }
 
-    /// Calculate optimal number of chunks for a given blob size
-    pub fn calculate_optimal_chunks(&self, blob_size: u64) -> u32 {
-        if blob_size <= self.optimal_chunk_size {
+    fn min_chunk_size(&self) -> u64 {
+        MIN_SIZE as u64
+    }
+
+    fn backend_name(&self) -> &str {
+        &self.backend_name
+    }
+
+    fn should_chunk_blob(&self, blob_size: u64) -> bool {
+        blob_size > self.optimal_chunk_size()
+    }
+
+    fn calculate_optimal_chunks(&self, blob_size: u64) -> u32 {
+        if blob_size <= self.optimal_chunk_size() {
             return 1;
         }
 
         // Calculate chunks needed, ensuring each chunk is within limits
-        let chunks_needed = blob_size.div_ceil(self.optimal_chunk_size);
+        let chunks_needed = blob_size.div_ceil(self.optimal_chunk_size());
         chunks_needed.max(1) as u32
     }
 }
 
 /// Intelligent blob chunker with adaptive sizing
 pub struct BlobChunker {
-    config: ChunkingConfig,
+    config: Box<dyn ChunkingConfigTrait>,
 }
 
 impl BlobChunker {
     /// Create a new blob chunker for a specific backend
     pub fn new(backend_name: &str) -> Self {
-        let config = ChunkingConfig::for_backend(backend_name);
+        let config = create_chunking_config(backend_name);
         console_info!(
             "{}",
             format!("🧩 [BlobChunker] Initialized for {} backend", backend_name)
@@ -154,9 +189,9 @@ impl BlobChunker {
             "{}",
             format!(
                 "📊 [BlobChunker] Config: max={:.1}MB, optimal={:.1}MB, min={:.1}MB",
-                config.max_chunk_size as f64 / 1_048_576.0,
-                config.optimal_chunk_size as f64 / 1_048_576.0,
-                config.min_chunk_size as f64 / 1_048_576.0
+                config.max_chunk_size() as f64 / 1_048_576.0,
+                config.optimal_chunk_size() as f64 / 1_048_576.0,
+                config.min_chunk_size() as f64 / 1_048_576.0
             )
         );
 
@@ -196,23 +231,23 @@ impl BlobChunker {
             } else {
                 0
             },
-            backend_compatibility: match self.config.backend_name.as_str() {
+            backend_compatibility: match self.config.backend_name() {
                 "OPFS" => {
-                    if blob_size <= self.config.max_chunk_size {
+                    if blob_size <= self.config.max_chunk_size() {
                         "Optimal"
                     } else {
                         "Chunking Required"
                     }
                 }
                 "IndexedDB" => {
-                    if blob_size <= self.config.max_chunk_size {
+                    if blob_size <= self.config.max_chunk_size() {
                         "Good"
                     } else {
                         "Chunking Required"
                     }
                 }
                 "LocalStorage" => {
-                    if blob_size <= self.config.optimal_chunk_size {
+                    if blob_size <= self.config.optimal_chunk_size() {
                         "Acceptable"
                     } else {
                         "Chunking Essential"
@@ -405,8 +440,8 @@ impl BlobChunker {
     }
 
     /// Get chunking configuration for this backend
-    pub fn get_config(&self) -> &ChunkingConfig {
-        &self.config
+    pub fn get_config(&self) -> &dyn ChunkingConfigTrait {
+        &*self.config
     }
 }
 
@@ -538,9 +573,9 @@ pub mod chunk_utils {
 
 //     #[test]
 //     fn test_chunk_id_parsing() {
-//         let chunk_id = "test_cid_123_chunk_0042";
+//         let chunk_id = "test_cid!23_chunk_0042";
 //         let (parent_cid, chunk_index) = chunk_utils::parse_chunk_id(chunk_id).unwrap();
-//         assert_eq!(parent_cid, "test_cid_123");
+//         assert_eq!(parent_cid, "test_cid!23");
 //         assert_eq!(chunk_index, 42);
 //     }
 
@@ -558,7 +593,7 @@ pub mod chunk_utils {
 //     async fn test_chunk_and_reassemble() {
 //         let chunker = BlobChunker::new("IndexedDB");
 //         let test_data = vec![0u8; 100_000]; // 100KB test data
-//         let cid = "test_blob_123";
+//         let cid = "test_blob!23";
 
 //         let chunks = chunker.chunk_blob(cid, test_data.clone()).await.unwrap();
 //         let reassembled = chunker.reassemble_chunks(chunks).await.unwrap();

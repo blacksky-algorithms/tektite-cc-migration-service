@@ -35,17 +35,17 @@ web-sys = { version = "0.3", features = [
     "Element",
     "Headers",
     "HtmlElement", 
+    "Location",
     "Navigator",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
     "Request",
     "RequestInit", 
     "RequestMode",
     "Response",
-    "ReadableStream",
-    "ReadableStreamDefaultReader",
     "Storage",
     "StorageManager",
     "Window",
-    "Location"
 ] }
 rexie = "0.5"  # For IndexedDB
 tracing = "0.1"

@@ -1,6 +1,8 @@
 mod storage_estimator;
 mod unified_config;
 
+use crate::console_warn;
+
 pub use storage_estimator::{
     get_storage_estimate, try_get_storage_estimate, StorageEstimate, StorageEstimatorError,
 };
@@ -226,7 +228,7 @@ pub fn get_global_config() -> MigrationConfig {
         .get_or_init(|| {
             let config = MigrationConfig::new();
             if let Err(e) = config.validate() {
-                web_sys::console::warn_1(&format!("Invalid configuration: {}", e).into());
+                console_warn!("Invalid configuration: {}", e);
                 MigrationConfig::new()
             } else {
                 config
@@ -248,7 +250,7 @@ pub async fn init_global_config_with_browser_storage() {
 pub async fn get_config_with_browser_storage() -> MigrationConfig {
     let config = MigrationConfig::new_with_browser_storage().await;
     if let Err(e) = config.validate() {
-        web_sys::console::warn_1(&format!("Invalid configuration: {}", e).into());
+        console_warn!("Invalid configuration: {}", e);
         MigrationConfig::new()
     } else {
         config

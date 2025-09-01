@@ -1,7 +1,7 @@
 use anyhow::Result;
+use cid::Cid;
 use reqwest::Client;
 use tracing::{error, info, instrument};
-use cid::Cid;
 
 use super::errors::ClientError;
 use super::identity_resolver::WebIdentityResolver;
@@ -20,7 +20,7 @@ impl PdsClient {
         Self {
             http_client: {
                 Client::builder()
-                    .user_agent("atproto-migration-service/1.0")
+                    .user_agent("tektite-cc-atproto-migration-service/1.0")
                     .build()
                     .expect("Failed to create HTTP client")
             },
@@ -48,7 +48,10 @@ impl PdsClient {
         password: &str,
         pds_url: &str,
     ) -> Result<ClientLoginResponse, ClientError> {
-        crate::services::client::auth::try_login_before_creation_impl(self, handle, password, pds_url).await
+        crate::services::client::auth::try_login_before_creation_impl(
+            self, handle, password, pds_url,
+        )
+        .await
     }
 
     /// Create account on a PDS
@@ -210,7 +213,8 @@ impl PdsClient {
         limit: Option<i64>,
         since: Option<String>,
     ) -> Result<ClientSyncListBlobsResponse, ClientError> {
-        crate::services::client::api::sync_list_blobs_impl(self, session, did, cursor, limit, since).await
+        crate::services::client::api::sync_list_blobs_impl(self, session, did, cursor, limit, since)
+            .await
     }
 
     /// List ALL blobs from source PDS with automatic pagination (Go goat runBlobExport compatible)
@@ -504,7 +508,8 @@ impl PdsClient {
         plc_unsigned: String,
         token: String,
     ) -> Result<ClientPlcSignResponse, ClientError> {
-        crate::services::client::api::sign_plc_operation_impl(self, session, plc_unsigned, token).await
+        crate::services::client::api::sign_plc_operation_impl(self, session, plc_unsigned, token)
+            .await
     }
 
     /// Submit PLC operation to PDS
@@ -565,7 +570,10 @@ impl PdsClient {
         cid: String,
         blob_data: Vec<u8>,
     ) -> Result<ClientBlobUploadResponse, ClientError> {
-        crate::services::client::api::upload_blob_with_circuit_breaker_impl(self, session, cid, blob_data).await
+        crate::services::client::api::upload_blob_with_circuit_breaker_impl(
+            self, session, cid, blob_data,
+        )
+        .await
     }
 
     /// Export a blob with circuit breaker protection
@@ -576,7 +584,8 @@ impl PdsClient {
         session: &ClientSessionCredentials,
         cid: String,
     ) -> Result<ClientBlobExportResponse, ClientError> {
-        crate::services::client::api::export_blob_with_circuit_breaker_impl(self, session, cid).await
+        crate::services::client::api::export_blob_with_circuit_breaker_impl(self, session, cid)
+            .await
     }
 }
 

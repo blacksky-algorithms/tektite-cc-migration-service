@@ -165,4 +165,3 @@ pub enum ErrorSeverity {
     High,
     Critical,
 }
-

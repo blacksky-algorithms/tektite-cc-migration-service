@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use cid::Cid;
+use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]
 use js_sys;

@@ -5,7 +5,9 @@ use crate::{console_error, console_info, console_warn};
 use crate::components::inputs::{InputType, ValidatedInput};
 use crate::migration::*;
 
-use crate::migration::{session_management::convert_session_to_client, storage::LocalStorageManager};
+use crate::migration::{
+    session_management::convert_session_to_client, storage::LocalStorageManager,
+};
 use crate::services::client::PdsClient;
 
 #[derive(Props, PartialEq, Clone)]
@@ -271,9 +273,53 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                                 }
                             };
 
+                            console_info!("[MILESTONE] Form4 PLC operations completed successfully - timestamp: {}", js_sys::Date::now());
                             console_info!("[Form4] Migration process completed!");
+
+                            // Complete migration state management with sequential dispatch and verification
+                            console_info!("[DISPATCH] About to call SetPlcVerifying(false)");
                             dispatch.call(MigrationAction::SetPlcVerifying(false));
-                            dispatch.call(MigrationAction::SetMigrationCompleted(true));
+
+                            // Small delay between dispatches to prevent queue conflicts
+                            let dispatch_copy1 = dispatch;
+                            gloo_timers::callback::Timeout::new(10, move || {
+                                console_info!("[DISPATCH] About to call SetMigrationCompleted(true)");
+                                dispatch_copy1.call(MigrationAction::SetMigrationCompleted(true));
+                            }).forget();
+
+                            let dispatch_copy2 = dispatch;
+                            gloo_timers::callback::Timeout::new(20, move || {
+                                console_info!("[DISPATCH] About to call SetMigrating(false) - THIS IS CRITICAL");
+                                dispatch_copy2.call(MigrationAction::SetMigrating(false));
+                            }).forget();
+
+                            let dispatch_copy3 = dispatch;
+                            gloo_timers::callback::Timeout::new(30, move || {
+                                console_info!("[DISPATCH] About to call SetBlobProgress(default)");
+                                dispatch_copy3.call(MigrationAction::SetBlobProgress(BlobProgress::default()));
+                            }).forget();
+
+                            let dispatch_copy4 = dispatch;
+                            gloo_timers::callback::Timeout::new(40, move || {
+                                console_info!("[DISPATCH] About to call SetMigrationStep");
+                                dispatch_copy4.call(MigrationAction::SetMigrationStep("🎉 Migration completed successfully!".to_string()));
+                            }).forget();
+
+                            // Verify state after all dispatches complete
+                            let state_copy = state;
+                            gloo_timers::callback::Timeout::new(100, move || {
+                                let final_state = state_copy();
+                                console_info!("[VERIFICATION] Final state verification - is_migrating={}, migration_completed={}, step='{}'",
+                                    final_state.is_migrating, final_state.migration_completed, final_state.migration_step);
+
+                                if final_state.is_migrating {
+                                    console_error!("[VERIFICATION] ERROR: is_migrating is still true after completion! This explains the frozen UI.");
+                                } else {
+                                    console_info!("[VERIFICATION] SUCCESS: is_migrating is now false, UI should update properly.");
+                                }
+                            }).forget();
+
+                            console_info!("[STATE] Migration completion sequence initiated with sequential dispatches");
                         });
                     },
                     if state().form4.is_verifying {

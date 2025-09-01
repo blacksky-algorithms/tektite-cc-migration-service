@@ -52,10 +52,10 @@ pub fn MigrationService() -> Element {
         }
     });
 
-    // Dispatch function for actions
+    // Dispatch function for actions - using in-place reduction to preserve Dioxus Signal reactivity
     let dispatch = EventHandler::new(move |action: MigrationAction| {
         state.with_mut(|s| {
-            *s = s.clone().reduce(action);
+            s.reduce_in_place(action);
         });
     });
 

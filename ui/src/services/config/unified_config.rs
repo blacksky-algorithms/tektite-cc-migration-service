@@ -3,26 +3,26 @@
 //! This module consolidates all configuration from across the codebase,
 //! providing platform-specific optimizations and centralized settings.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Unified configuration for the entire migration system
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedMigrationConfig {
     /// Streaming configuration for data transfer operations
     pub streaming: StreamingConfig,
-    
+
     /// Performance configuration for optimization
     pub performance: PerformanceConfig,
-    
+
     /// Platform-specific configuration
     pub platform: PlatformConfig,
-    
+
     /// Network configuration for transfers
     pub network: NetworkConfig,
-    
+
     /// Memory management configuration
     pub memory: MemoryConfig,
-    
+
     /// Security and validation configuration
     pub security: SecurityConfig,
 }
@@ -32,22 +32,22 @@ pub struct UnifiedMigrationConfig {
 pub struct StreamingConfig {
     /// Default chunk size for streaming operations
     pub chunk_size: usize,
-    
+
     /// Maximum number of concurrent streams
     pub max_concurrent: u32,
-    
+
     /// Maximum memory threshold (as ratio of available memory)
     pub memory_threshold: f64,
-    
+
     /// Whether to enable compression for streaming
     pub enable_compression: bool,
-    
+
     /// Compression algorithm to use
     pub compression_algorithm: CompressionAlgorithm,
-    
+
     /// Buffer size for streaming operations
     pub buffer_size: usize,
-    
+
     /// Enable streaming metrics collection
     pub enable_metrics: bool,
 }
@@ -57,22 +57,22 @@ pub struct StreamingConfig {
 pub struct PerformanceConfig {
     /// Maximum number of retry attempts
     pub max_retries: u32,
-    
+
     /// Base retry delay in milliseconds
     pub retry_delay_ms: u64,
-    
+
     /// Retry backoff multiplier
     pub retry_backoff_multiplier: f64,
-    
+
     /// Timeout for individual operations in milliseconds
     pub operation_timeout_ms: u64,
-    
+
     /// Chunk processing timeout in milliseconds
     pub chunk_timeout_ms: u64,
-    
+
     /// Enable adaptive performance tuning
     pub enable_adaptive_tuning: bool,
-    
+
     /// Performance monitoring interval in milliseconds
     pub monitoring_interval_ms: u64,
 }
@@ -82,13 +82,13 @@ pub struct PerformanceConfig {
 pub struct PlatformConfig {
     /// Target platform
     pub platform_type: PlatformType,
-    
+
     /// Browser-specific settings (when platform is Browser)
     pub browser_config: Option<BrowserConfig>,
-    
+
     /// Desktop-specific settings (when platform is Desktop)
     pub desktop_config: Option<DesktopConfig>,
-    
+
     /// Mobile-specific settings (when platform is Mobile)
     pub mobile_config: Option<MobileConfig>,
 }
@@ -98,19 +98,19 @@ pub struct PlatformConfig {
 pub struct NetworkConfig {
     /// Connection timeout in milliseconds
     pub connect_timeout_ms: u64,
-    
+
     /// Request timeout in milliseconds
     pub request_timeout_ms: u64,
-    
+
     /// Maximum number of redirects to follow
     pub max_redirects: u32,
-    
+
     /// Enable HTTP/2 if available
     pub enable_http2: bool,
-    
+
     /// User agent string
     pub user_agent: String,
-    
+
     /// Network quality adaptation settings
     pub quality_adaptation: QualityAdaptationConfig,
 }
@@ -120,16 +120,16 @@ pub struct NetworkConfig {
 pub struct MemoryConfig {
     /// Maximum memory usage in bytes
     pub max_memory_bytes: u64,
-    
+
     /// Memory pressure threshold (0.0 to 1.0)
     pub pressure_threshold: f64,
-    
+
     /// Enable memory monitoring
     pub enable_monitoring: bool,
-    
+
     /// Memory cleanup interval in milliseconds
     pub cleanup_interval_ms: u64,
-    
+
     /// Enable aggressive garbage collection
     pub aggressive_gc: bool,
 }
@@ -139,16 +139,16 @@ pub struct MemoryConfig {
 pub struct SecurityConfig {
     /// Enable data integrity checking
     pub enable_integrity_checks: bool,
-    
+
     /// Hash algorithm for integrity checks
     pub hash_algorithm: HashAlgorithm,
-    
+
     /// Enable TLS verification
     pub verify_tls: bool,
-    
+
     /// Maximum allowed redirect chains
     pub max_redirect_depth: u32,
-    
+
     /// Allowed domains for migration (empty = allow all)
     pub allowed_domains: Vec<String>,
 }
@@ -167,16 +167,16 @@ pub enum PlatformType {
 pub struct BrowserConfig {
     /// Use OPFS for storage when available
     pub prefer_opfs: bool,
-    
+
     /// Use IndexedDB for large data
     pub use_indexeddb: bool,
-    
+
     /// Use localStorage for small data
     pub use_localstorage: bool,
-    
+
     /// Enable Service Worker if available
     pub enable_service_worker: bool,
-    
+
     /// Web Worker configuration
     pub web_workers: WebWorkerConfig,
 }
@@ -186,10 +186,10 @@ pub struct BrowserConfig {
 pub struct DesktopConfig {
     /// Use native file system APIs
     pub use_native_fs: bool,
-    
+
     /// Maximum concurrent file operations
     pub max_file_operations: u32,
-    
+
     /// Enable memory mapping for large files
     pub enable_mmap: bool,
 }
@@ -199,10 +199,10 @@ pub struct DesktopConfig {
 pub struct MobileConfig {
     /// Reduce memory usage on mobile
     pub low_memory_mode: bool,
-    
+
     /// Reduce network usage on mobile data
     pub conservative_network: bool,
-    
+
     /// Battery optimization settings
     pub battery_optimization: BatteryOptimizationConfig,
 }
@@ -212,13 +212,13 @@ pub struct MobileConfig {
 pub struct WebWorkerConfig {
     /// Enable Web Workers for compression
     pub enable_for_compression: bool,
-    
+
     /// Enable Web Workers for hashing
     pub enable_for_hashing: bool,
-    
+
     /// Maximum number of Web Workers
     pub max_workers: u32,
-    
+
     /// Worker idle timeout in milliseconds
     pub idle_timeout_ms: u64,
 }
@@ -228,13 +228,13 @@ pub struct WebWorkerConfig {
 pub struct QualityAdaptationConfig {
     /// Enable automatic quality adaptation
     pub enabled: bool,
-    
+
     /// Minimum chunk size for slow connections
     pub min_chunk_size: usize,
-    
+
     /// Maximum chunk size for fast connections
     pub max_chunk_size: usize,
-    
+
     /// Adaptation response time in milliseconds
     pub adaptation_interval_ms: u64,
 }
@@ -244,13 +244,13 @@ pub struct QualityAdaptationConfig {
 pub struct BatteryOptimizationConfig {
     /// Enable battery optimizations
     pub enabled: bool,
-    
+
     /// Reduce CPU usage when on battery
     pub reduce_cpu_usage: bool,
-    
+
     /// Reduce network activity when on battery
     pub reduce_network_activity: bool,
-    
+
     /// Battery level threshold for optimizations (0.0 to 1.0)
     pub low_battery_threshold: f64,
 }
@@ -286,8 +286,8 @@ impl StreamingConfig {
         match platform {
             PlatformType::Browser => Self {
                 chunk_size: 256 * 1024, // 256KB for browsers
-                max_concurrent: 4,       // Conservative for browser
-                memory_threshold: 0.8,   // 80% memory threshold
+                max_concurrent: 4,      // Conservative for browser
+                memory_threshold: 0.8,  // 80% memory threshold
                 enable_compression: true,
                 compression_algorithm: CompressionAlgorithm::Gzip,
                 buffer_size: 64 * 1024, // 64KB buffer
@@ -295,8 +295,8 @@ impl StreamingConfig {
             },
             PlatformType::Mobile => Self {
                 chunk_size: 128 * 1024, // Smaller chunks for mobile
-                max_concurrent: 2,       // Very conservative
-                memory_threshold: 0.7,   // Lower threshold
+                max_concurrent: 2,      // Very conservative
+                memory_threshold: 0.7,  // Lower threshold
                 enable_compression: true,
                 compression_algorithm: CompressionAlgorithm::Gzip,
                 buffer_size: 32 * 1024, // Smaller buffer
@@ -304,8 +304,8 @@ impl StreamingConfig {
             },
             PlatformType::Desktop => Self {
                 chunk_size: 1024 * 1024, // 1MB for desktop
-                max_concurrent: 8,        // Higher concurrency
-                memory_threshold: 0.9,    // Higher threshold
+                max_concurrent: 8,       // Higher concurrency
+                memory_threshold: 0.9,   // Higher threshold
                 enable_compression: true,
                 compression_algorithm: CompressionAlgorithm::Lz4,
                 buffer_size: 256 * 1024, // Larger buffer
@@ -313,8 +313,8 @@ impl StreamingConfig {
             },
             PlatformType::Server => Self {
                 chunk_size: 4 * 1024 * 1024, // 4MB for server
-                max_concurrent: 16,           // Much higher concurrency
-                memory_threshold: 0.95,       // Very high threshold
+                max_concurrent: 16,          // Much higher concurrency
+                memory_threshold: 0.95,      // Very high threshold
                 enable_compression: true,
                 compression_algorithm: CompressionAlgorithm::Brotli,
                 buffer_size: 1024 * 1024, // Large buffer
@@ -345,7 +345,7 @@ impl Default for NetworkConfig {
             request_timeout_ms: 30_000,
             max_redirects: 10,
             enable_http2: true,
-            user_agent: "ATProto-Migration-Service/1.0".to_string(),
+            user_agent: "tektite-cc-atproto-migration-service/1.0".to_string(),
             quality_adaptation: QualityAdaptationConfig::default(),
         }
     }
@@ -379,7 +379,7 @@ impl Default for QualityAdaptationConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            min_chunk_size: 32 * 1024,  // 32KB minimum
+            min_chunk_size: 32 * 1024,       // 32KB minimum
             max_chunk_size: 2 * 1024 * 1024, // 2MB maximum
             adaptation_interval_ms: 10_000,
         }
@@ -435,10 +435,10 @@ impl UnifiedMigrationConfig {
             network: NetworkConfig::default(),
             memory: MemoryConfig {
                 max_memory_bytes: 256 * 1024 * 1024, // 256MB for browser
-                pressure_threshold: 0.75, // Lower threshold for browser
+                pressure_threshold: 0.75,            // Lower threshold for browser
                 enable_monitoring: true,
                 cleanup_interval_ms: 15_000, // More frequent cleanup
-                aggressive_gc: true, // Enable for browser
+                aggressive_gc: true,         // Enable for browser
             },
             security: SecurityConfig::default(),
         }
@@ -510,7 +510,7 @@ impl UnifiedMigrationConfig {
                 Self::for_browser()
             }
         }
-        
+
         #[cfg(not(target_arch = "wasm32"))]
         {
             Self::for_desktop()
@@ -560,7 +560,7 @@ fn is_mobile_browser() -> bool {
         let navigator = window.navigator();
         if let Ok(user_agent) = navigator.user_agent() {
             let user_agent = user_agent.to_lowercase();
-            return user_agent.contains("mobile") 
+            return user_agent.contains("mobile")
                 || user_agent.contains("android")
                 || user_agent.contains("iphone")
                 || user_agent.contains("ipad");
@@ -589,7 +589,7 @@ mod tests {
         let mut config = UnifiedMigrationConfig::default();
         config.streaming.chunk_size = 0;
         config.streaming.memory_threshold = 1.5;
-        
+
         let errors = config.validate().unwrap_err();
         assert_eq!(errors.len(), 2);
     }
@@ -606,7 +606,7 @@ mod tests {
 
         // Mobile should have smaller chunk size than browser
         assert!(mobile_config.streaming.chunk_size < browser_config.streaming.chunk_size);
-        
+
         // Desktop should have larger chunk size than browser
         assert!(desktop_config.streaming.chunk_size > browser_config.streaming.chunk_size);
     }

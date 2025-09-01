@@ -1,5 +1,6 @@
 // Core types for Migration Service - no dioxus imports needed here
 use serde::{Deserialize, Serialize, Serializer};
+use std::collections::VecDeque;
 
 use crate::services::client::ClientPdsProvider;
 
@@ -101,16 +102,6 @@ pub enum FormStep {
     PlcVerification,
 }
 
-// Migration checkpoint management for resumption
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub enum MigrationCheckpoint {
-    AccountCreated,      // Account exists, need repo migration
-    RepoMigrated,        // Repo imported, need blob migration
-    BlobsMigrated,       // Blobs imported, need preferences migration
-    PreferencesMigrated, // Preferences migrated, need PLC operations
-    PlcReady,            // Ready for Form 4 transition
-}
-
 // Validation status enums
 #[derive(Clone, PartialEq, Debug)]
 pub enum HandleValidation {
@@ -160,6 +151,7 @@ pub enum MigrationAction {
     SetNewPasswordConfirm(String),
     SetEmailAddress(String),
     SetInviteCode(String),
+    SetSelectedDomain(String),
 
     // Form 4 - PLC Verification actions
     SetPlcVerificationCode(String),
@@ -187,6 +179,10 @@ pub enum MigrationAction {
 
     // PLC recommendation storage
     SetPlcRecommendation(Option<String>),
+    // Original PDS describe response cache
+    SetOriginalPdsDescribe(Option<PdsDescribeResponse>),
+    // Console message logging
+    AddConsoleMessage(String),
 }
 
 // Form state structs
@@ -219,6 +215,7 @@ pub struct MigrationDetailsForm {
     pub invite_code: String,
     pub suggested_handle: String,
     pub is_checking_handle: bool,
+    pub selected_domain: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -338,6 +335,13 @@ pub struct MigrationState {
     pub migration_completed: bool,
     // PLC recommendation storage
     pub plc_recommendation: Option<String>,
+    // Original PDS describe response cache
+    pub original_pds_describe: Option<PdsDescribeResponse>,
+    // Console messages for blob progress display (max 10 recent messages)
+    pub console_messages: VecDeque<String>,
+    // Performance optimization: cache for unified_blob_progress
+    pub cached_unified_blob_progress: Option<BlobProgress>,
+    pub blob_progress_cache_key: u64,
 }
 
 impl MigrationState {
@@ -403,6 +407,9 @@ impl MigrationState {
             MigrationAction::SetCheckingHandle(checking) => {
                 self.form3.is_checking_handle = checking;
             }
+            MigrationAction::SetSelectedDomain(domain) => {
+                self.form3.selected_domain = Some(domain);
+            }
 
             // Form 4 - PLC Verification actions
             MigrationAction::SetPlcVerificationCode(code) => {
@@ -422,7 +429,197 @@ impl MigrationState {
 
             // Migration process actions
             MigrationAction::SetMigrating(migrating) => {
+                crate::console_info!(
+                    "[REDUCER] SetMigrating reducer entered with value: {} - timestamp: {}",
+                    migrating,
+                    js_sys::Date::now()
+                );
+
+                let old_value = self.is_migrating;
                 self.is_migrating = migrating;
+
+                crate::console_info!(
+                    "[STATE] Migration state changing: is_migrating={} -> {} - timestamp: {}",
+                    old_value,
+                    migrating,
+                    js_sys::Date::now()
+                );
+
+                crate::console_info!("[REDUCER] SetMigrating reducer completed successfully - final is_migrating: {}", 
+                    self.is_migrating);
+            }
+            MigrationAction::SetMigrationError(error) => {
+                self.migration_error = error;
+            }
+            MigrationAction::SetMigrationStep(step) => {
+                self.migration_step = step;
+            }
+            MigrationAction::SetNewPdsSession(session) => {
+                self.new_pds_session = session;
+            }
+            MigrationAction::SetCurrentStep(step) => {
+                let old_step = &self.current_step;
+
+                // Initialize domain selection when entering MigrationDetails form
+                if step == FormStep::MigrationDetails && self.form3.selected_domain.is_none() {
+                    let domains = self.get_available_domains();
+                    if let Some(first_domain) = domains.first() {
+                        self.form3.selected_domain = Some(first_domain.clone());
+                    }
+                }
+
+                crate::console_info!("[FORM] Transitioning from {:?} to {:?} - migration_status: is_migrating={}, completed={} - timestamp: {}", 
+                    old_step, step, self.is_migrating, self.migration_completed, js_sys::Date::now());
+
+                self.current_step = step;
+            }
+
+            // Extended migration progress tracking
+            MigrationAction::SetMigrationProgress(progress) => {
+                self.migration_progress = progress;
+            }
+            MigrationAction::SetRepoProgress(progress) => {
+                self.repo_progress = progress;
+                self.update_unified_blob_progress_cache();
+            }
+            MigrationAction::SetBlobProgress(progress) => {
+                crate::console_debug!("[BLOB] Progress state updated: total={}, processed={}, total_bytes={}, processed_bytes={}", 
+                    progress.total_blobs, progress.processed_blobs, progress.total_bytes, progress.processed_bytes);
+                self.blob_progress = progress;
+                self.update_unified_blob_progress_cache();
+            }
+            MigrationAction::SetPreferencesProgress(progress) => {
+                self.preferences_progress = progress;
+            }
+            MigrationAction::SetPlcProgress(progress) => {
+                self.plc_progress = progress;
+            }
+            MigrationAction::SetMigrationCompleted(completed) => {
+                let old_value = self.migration_completed;
+                self.migration_completed = completed;
+                crate::console_info!("[STATE] Migration completion changing: migration_completed={} -> {} - timestamp: {}", 
+                    old_value, completed, js_sys::Date::now());
+            }
+            MigrationAction::SetPlcRecommendation(recommendation) => {
+                self.plc_recommendation = recommendation;
+            }
+            MigrationAction::SetOriginalPdsDescribe(describe) => {
+                self.original_pds_describe = describe;
+            }
+            MigrationAction::AddConsoleMessage(message) => {
+                self.console_messages.push_back(message);
+                // Keep only the most recent 10 messages
+                while self.console_messages.len() > 10 {
+                    self.console_messages.pop_front();
+                }
+            }
+        }
+        self
+    }
+
+    /// Reduces the state based on an action in-place (preserves Dioxus Signal reactivity)
+    pub fn reduce_in_place(&mut self, action: MigrationAction) {
+        match action {
+            // Form 1 actions
+            MigrationAction::SetHandle(handle) => {
+                self.form1.handle = handle;
+            }
+            MigrationAction::SetPassword(password) => {
+                self.form1.password = password;
+            }
+            MigrationAction::SetProvider(provider) => {
+                self.form1.provider = provider;
+            }
+            MigrationAction::SetLoading(loading) => {
+                self.form1.is_loading = loading;
+            }
+            MigrationAction::SetAuthenticating(auth) => {
+                self.form1.is_authenticating = auth;
+            }
+            MigrationAction::SetLoginResponse(response) => {
+                self.form1.login_response = response;
+            }
+            MigrationAction::SetSessionStored(stored) => {
+                self.form1.session_stored = stored;
+            }
+            MigrationAction::SetOriginalHandle(handle) => {
+                self.form1.original_handle = handle;
+            }
+
+            // Form 2 actions
+            MigrationAction::SetNewPdsUrl(url) => {
+                self.form2.pds_url = url;
+            }
+            MigrationAction::SetForm2Submitted(submitted) => {
+                self.form2.submitted = submitted;
+            }
+            MigrationAction::SetPdsDescribeResponse(response) => {
+                self.form2.describe_response = response;
+            }
+            MigrationAction::SetDescribingPds(describing) => {
+                self.form2.is_describing = describing;
+            }
+
+            // Form 3 actions
+            MigrationAction::SetNewHandle(handle) => {
+                self.form3.handle = handle;
+            }
+            MigrationAction::SetNewPassword(password) => {
+                self.form3.password = password;
+            }
+            MigrationAction::SetNewPasswordConfirm(password) => {
+                self.form3.password_confirm = password;
+            }
+            MigrationAction::SetEmailAddress(email) => {
+                self.form3.email = email;
+            }
+            MigrationAction::SetInviteCode(code) => {
+                self.form3.invite_code = code;
+            }
+            MigrationAction::SetSelectedDomain(domain) => {
+                self.form3.selected_domain = Some(domain);
+            }
+
+            // Form 4 - PLC Verification actions
+            MigrationAction::SetPlcVerificationCode(code) => {
+                self.form4.verification_code = code;
+            }
+            MigrationAction::SetPlcUnsigned(unsigned) => {
+                self.form4.plc_unsigned = unsigned;
+            }
+            MigrationAction::SetPlcVerifying(verifying) => {
+                self.form4.is_verifying = verifying;
+            }
+
+            // Validation actions
+            MigrationAction::SetHandleValidation(validation) => {
+                self.validations.handle = validation;
+            }
+            MigrationAction::SetCheckingHandle(checking) => {
+                // This should likely update the form3.is_checking_handle field instead
+                self.form3.is_checking_handle = checking;
+            }
+
+            // Migration process actions
+            MigrationAction::SetMigrating(migrating) => {
+                crate::console_info!(
+                    "[REDUCER] SetMigrating reducer entered with value: {} - timestamp: {}",
+                    migrating,
+                    js_sys::Date::now()
+                );
+
+                let old_value = self.is_migrating;
+                self.is_migrating = migrating;
+
+                crate::console_info!(
+                    "[STATE] Migration state changing: is_migrating={} -> {} - timestamp: {}",
+                    old_value,
+                    migrating,
+                    js_sys::Date::now()
+                );
+
+                crate::console_info!("[REDUCER] SetMigrating reducer completed successfully - final is_migrating: {}", 
+                    self.is_migrating);
             }
             MigrationAction::SetMigrationError(error) => {
                 self.migration_error = error;
@@ -443,9 +640,13 @@ impl MigrationState {
             }
             MigrationAction::SetRepoProgress(progress) => {
                 self.repo_progress = progress;
+                self.update_unified_blob_progress_cache();
             }
             MigrationAction::SetBlobProgress(progress) => {
+                crate::console_debug!("[BLOB] Progress state updated: total={}, processed={}, total_bytes={}, processed_bytes={}", 
+                    progress.total_blobs, progress.processed_blobs, progress.total_bytes, progress.processed_bytes);
                 self.blob_progress = progress;
+                self.update_unified_blob_progress_cache();
             }
             MigrationAction::SetPreferencesProgress(progress) => {
                 self.preferences_progress = progress;
@@ -454,13 +655,28 @@ impl MigrationState {
                 self.plc_progress = progress;
             }
             MigrationAction::SetMigrationCompleted(completed) => {
+                let old_value = self.migration_completed;
                 self.migration_completed = completed;
+                crate::console_info!("[STATE] Migration completion changing: migration_completed={} -> {} - timestamp: {}", 
+                    old_value, completed, js_sys::Date::now());
             }
+
+            // PLC recommendation storage
             MigrationAction::SetPlcRecommendation(recommendation) => {
                 self.plc_recommendation = recommendation;
             }
+            // Original PDS describe response cache
+            MigrationAction::SetOriginalPdsDescribe(describe) => {
+                self.original_pds_describe = describe;
+            }
+            MigrationAction::AddConsoleMessage(message) => {
+                self.console_messages.push_back(message);
+                // Keep only the most recent 10 messages
+                while self.console_messages.len() > 10 {
+                    self.console_messages.pop_front();
+                }
+            }
         }
-        self
     }
 
     /// Helper methods for common state queries
@@ -515,6 +731,117 @@ impl MigrationState {
                 * 100.0
         }
     }
+
+    /// Calculate a cache key for unified_blob_progress based on relevant fields
+    fn calculate_blob_progress_cache_key(&self) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+
+        // Hash the fields that affect unified_blob_progress calculation
+        self.blob_progress.total_blobs.hash(&mut hasher);
+        self.blob_progress.processed_blobs.hash(&mut hasher);
+        self.blob_progress.total_bytes.hash(&mut hasher);
+        self.blob_progress.processed_bytes.hash(&mut hasher);
+        self.repo_progress.car_size.hash(&mut hasher);
+
+        hasher.finish()
+    }
+
+    /// Get unified blob progress that accounts for both repository and dedicated blob migration
+    /// Repository migration processes embedded blobs, while blob migration handles missing ones
+    /// Uses memoization to avoid expensive calculations on every call
+    pub fn unified_blob_progress(&self) -> BlobProgress {
+        // DEBUG: Log blob progress state for troubleshooting UI freeze
+        crate::console_log!(
+            "[DEBUG unified_blob_progress] blob_progress: {}/{} blobs, {}/{} bytes",
+            self.blob_progress.processed_blobs,
+            self.blob_progress.total_blobs,
+            self.blob_progress.processed_bytes,
+            self.blob_progress.total_bytes
+        );
+
+        // Check if we can use cached result
+        let current_cache_key = self.calculate_blob_progress_cache_key();
+        if let Some(ref cached) = self.cached_unified_blob_progress {
+            if self.blob_progress_cache_key == current_cache_key {
+                crate::console_log!("[DEBUG unified_blob_progress] Using cached result");
+                return cached.clone();
+            }
+        }
+
+        crate::console_log!("[DEBUG unified_blob_progress] Cache miss, calculating...");
+
+        // Cache miss - perform the calculation
+        // Use the existing blob_progress which gets updated during both phases
+        // Repository phase: estimates blobs from streamed data
+        // Blob phase: uses actual blob counts and continues from where repository left off
+        let mut unified = self.blob_progress.clone();
+
+        // If we're in repository migration phase and have repo progress, ensure we show something
+        if unified.total_blobs == 0
+            && unified.processed_blobs == 0
+            && self.repo_progress.car_size > 0
+        {
+            // Estimate blobs from repository size as fallback
+            let estimated_blobs = std::cmp::max(1, (self.repo_progress.car_size / 10_000) as u32);
+            unified.total_blobs = estimated_blobs;
+            unified.processed_blobs = estimated_blobs;
+            unified.total_bytes = self.repo_progress.car_size;
+            unified.processed_bytes = self.repo_progress.car_size;
+        }
+
+        // Note: We can't update the cache here because self is immutable
+        // The cache will be updated in the reducer when state changes
+        unified
+    }
+
+    /// Update the unified blob progress cache - called from the reducer when relevant state changes
+    pub fn update_unified_blob_progress_cache(&mut self) {
+        let current_cache_key = self.calculate_blob_progress_cache_key();
+        if self.blob_progress_cache_key != current_cache_key {
+            // Recalculate and cache the result
+            let mut unified = self.blob_progress.clone();
+
+            if unified.total_blobs == 0
+                && unified.processed_blobs == 0
+                && self.repo_progress.car_size > 0
+            {
+                let estimated_blobs =
+                    std::cmp::max(1, (self.repo_progress.car_size / 10_000) as u32);
+                unified.total_blobs = estimated_blobs;
+                unified.processed_blobs = estimated_blobs;
+                unified.total_bytes = self.repo_progress.car_size;
+                unified.processed_bytes = self.repo_progress.car_size;
+            }
+
+            self.cached_unified_blob_progress = Some(unified);
+            self.blob_progress_cache_key = current_cache_key;
+        }
+    }
+
+    /// Check if we should display blob progress based on migration state
+    pub fn should_show_blob_progress(&self) -> bool {
+        crate::console_info!("[BLOB] should_show_blob_progress() called - evaluating conditions");
+
+        let unified = self.unified_blob_progress();
+
+        let has_blobs = unified.total_blobs > 0;
+        let has_blob_step = self.migration_step.contains("blob");
+        let has_repo_step = self.migration_step.contains("repository");
+        let has_streaming_step = self.migration_step.contains("streaming");
+        let is_migrating = self.is_migrating;
+        let migration_completed = self.migration_completed;
+
+        let should_show =
+            has_blobs || has_blob_step || has_repo_step || has_streaming_step || is_migrating;
+
+        crate::console_info!("[BLOB] should_show_blob_progress decision: show={}, has_blobs={}, has_blob_step={}, has_repo_step={}, has_streaming_step={}, is_migrating={}, migration_completed={}, step='{}'", 
+            should_show, has_blobs, has_blob_step, has_repo_step, has_streaming_step, is_migrating, migration_completed, self.migration_step);
+
+        should_show
+    }
 }
 
 impl Default for LoginForm {
@@ -562,6 +889,10 @@ impl Default for MigrationState {
             plc_progress: PlcProgress::default(),
             migration_completed: false,
             plc_recommendation: None,
+            original_pds_describe: None,
+            console_messages: VecDeque::new(),
+            cached_unified_blob_progress: None,
+            blob_progress_cache_key: 0,
         }
     }
 }

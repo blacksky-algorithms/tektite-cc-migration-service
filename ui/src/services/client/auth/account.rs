@@ -2,9 +2,9 @@ use anyhow::Result;
 use serde_json::json;
 use tracing::{error, info, instrument};
 
-use crate::services::client::{ClientError, PdsClient};
 use crate::services::client::session::JwtUtils;
 use crate::services::client::types::*;
+use crate::services::client::{ClientError, PdsClient};
 
 /// Implementation of create_account functionality
 /// Create account on a PDS
@@ -167,8 +167,7 @@ pub async fn create_account_impl(
             info!("Account already exists, but session credentials provided for resumption");
             Ok(ClientCreateAccountResponse {
                 success: true, // Mark as success since we got session credentials
-                message: "Account already exists - resuming with provided credentials"
-                    .to_string(),
+                message: "Account already exists - resuming with provided credentials".to_string(),
                 session,
                 error_code,
                 resumable,
@@ -344,8 +343,7 @@ pub async fn get_service_auth_impl(
     );
 
     // NEWBOLD.md: com.atproto.server.getServiceAuth for secure migration auth token
-    let mut service_auth_url =
-        format!("{}/xrpc/com.atproto.server.getServiceAuth", session.pds);
+    let mut service_auth_url = format!("{}/xrpc/com.atproto.server.getServiceAuth", session.pds);
     let mut query_params = Vec::new();
 
     // Required parameter: aud (audience - target PDS service DID)

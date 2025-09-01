@@ -48,13 +48,13 @@ mod tests {
         // Test case 4: Valid cursor
         let json_valid_cursor = json!({
             "blobs": [],
-            "cursor": "next_page_token_123"
+            "cursor": "next_page_token!23"
         });
         let cursor = json_valid_cursor
             .get("cursor")
             .and_then(|c| c.as_str())
             .map(|s| s.to_string());
-        assert_eq!(cursor, Some("next_page_token_123".to_string()));
+        assert_eq!(cursor, Some("next_page_token!23".to_string()));
     }
 
     /// Test cursor continuation logic (matches Go goat pattern)

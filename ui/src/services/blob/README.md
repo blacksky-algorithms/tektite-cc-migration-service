@@ -287,10 +287,11 @@ Based on browser testing:
 | Scenario | StreamingStrategy | StorageStrategy |
 |----------|-------------------|-----------------|
 | 100 × 1MB files | 45 seconds | 65 seconds |
-| 10 × 50MB files | 120 seconds | 140 seconds |
-| 1 × 500MB file | 240 seconds | ⚠️ Storage quota |
+| 10 × 50MB files | 120 seconds (Safari limits) | 140 seconds |
+| 1 × 500MB file | 240 seconds (chunked at 25MB) | ⚠️ Storage quota |
 | Unreliable network | ✅ Resumes | ✅ Cached resume |
 | Browser crash recovery | ❌ Lost progress | ✅ Resume from cache |
+| **Cross-browser consistency** | **✅ Unified Safari limits** | **✅ Consistent behavior** |
 
 ## Troubleshooting
 
@@ -436,6 +437,33 @@ The blob migration strategies provide robust, flexible transfer mechanisms optim
 StreamingStrategy uses **bounded channels** for reliable backpressure control, while StorageStrategy uses **browser storage** with RAII cleanup for reliability, ensuring stable operation even under constrained memory conditions and network interruptions.
 
 ## Recent Changes
+
+### Const Generic Chunking Configuration (Latest)
+
+**Unified Chunking Strategy**: All blob chunking now uses Safari's conservative limits across all browsers, eliminating browser-specific complexity:
+
+```rust
+// Before: Browser-specific chunking
+match browser_type {
+    Chrome => (100MB, 50MB, 10MB),
+    Firefox => (75MB, 30MB, 10MB), 
+    Safari => (50MB, 25MB, 5MB),
+}
+
+// After: Unified const generic chunking
+type OpfsChunkingConfig = ChunkingConfig<25_MB, 50_MB, 5_MB>;  // Safari limits for all
+type IndexedDbChunkingConfig = ChunkingConfig<10_MB, 25_MB, 2_MB>;
+type LocalStorageChunkingConfig = ChunkingConfig<512_KB, 1_MB, 256_KB>;
+```
+
+**Benefits**:
+- **Const Generic Optimization**: Compile-time chunk size allocation eliminates runtime decisions
+- **Consistent Behavior**: Same memory usage and performance across all browsers
+- **Simplified Codebase**: No more browser detection or browser-specific branching
+- **Memory Predictability**: Fixed memory footprint important for WASM heap management
+- **Type Safety**: Different backends have different compile-time types
+
+### Architecture Simplification
 
 The concurrent strategy has been removed to simplify the architecture and align with the reference implementation. The system now uses a simple heuristic: storage strategy for small migrations (≤10 blobs) and streaming strategy for larger migrations.
 
