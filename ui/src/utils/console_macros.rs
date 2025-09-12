@@ -7,50 +7,60 @@
 #[macro_export]
 macro_rules! console_info {
     ($fmt:expr) => {
-        gloo_console::info!(format!("[{}] {}", js_sys::Date::now(), $fmt))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::info!(format!("[{}] {}", timestamp, $fmt))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        gloo_console::info!(format!("[{}] {}", js_sys::Date::now(), format!($fmt, $($arg)*)))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::info!(format!("[{}] {}", timestamp, format!($fmt, $($arg)*)))
     };
 }
 
 #[macro_export]
 macro_rules! console_log {
     ($fmt:expr) => {
-        gloo_console::log!(format!("[{}] {}", js_sys::Date::now(), $fmt))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::log!(format!("[{}] {}", timestamp, $fmt))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        gloo_console::log!(format!("[{}] {}", js_sys::Date::now(), format!($fmt, $($arg)*)))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::log!(format!("[{}] {}", timestamp, format!($fmt, $($arg)*)))
     };
 }
 
 #[macro_export]
 macro_rules! console_warn {
     ($fmt:expr) => {
-        gloo_console::warn!(format!("[{}] {}", js_sys::Date::now(), $fmt))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::warn!(format!("[{}] {}", timestamp, $fmt))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        gloo_console::warn!(format!("[{}] {}", js_sys::Date::now(), format!($fmt, $($arg)*)))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::warn!(format!("[{}] {}", timestamp, format!($fmt, $($arg)*)))
     };
 }
 
 #[macro_export]
 macro_rules! console_error {
     ($fmt:expr) => {
-        gloo_console::error!(format!("[{}] {}", js_sys::Date::now(), $fmt))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::error!(format!("[{}] {}", timestamp, $fmt))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        gloo_console::error!(format!("[{}] {}", js_sys::Date::now(), format!($fmt, $($arg)*)))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::error!(format!("[{}] {}", timestamp, format!($fmt, $($arg)*)))
     };
 }
 
 #[macro_export]
 macro_rules! console_debug {
     ($fmt:expr) => {
-        gloo_console::debug!(format!("[{}] {}", js_sys::Date::now(), $fmt))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::debug!(format!("[{}] {}", timestamp, $fmt))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        gloo_console::debug!(format!("[{}] {}", js_sys::Date::now(), format!($fmt, $($arg)*)))
+        let timestamp = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        gloo_console::debug!(format!("[{}] {}", timestamp, format!($fmt, $($arg)*)))
     };
 }
 
