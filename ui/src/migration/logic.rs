@@ -168,6 +168,7 @@ pub async fn execute_migration_client_side(
     // Use the PDS URL from form 2 (user already provided it)
     let new_pds_url = state.form2.pds_url.clone();
 
+    // TODO: Remove this once you feel comfortable
     // Derive PDS URL for login attempt
     // let new_pds_url = migration_client
     //     .pds_client
