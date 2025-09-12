@@ -40,19 +40,53 @@ impl PdsClient {
         crate::services::client::auth::login_impl(self, identifier, password).await
     }
 
-    /// Try to login with new PDS credentials to check if account already exists
-    #[instrument(skip(self, password), err)]
+    /// Try to login with full options including auth factor and takendown support
+    pub async fn try_login_before_creation_full(
+        &self,
+        handle: &str,
+        password: &str,
+        pds_url: &str,
+        auth_factor_token: Option<&str>,
+        allow_takendown: Option<bool>,
+    ) -> Result<ClientLoginResponse, ClientError> {
+        crate::services::client::auth::try_login_before_creation_full_impl(
+            self,
+            handle,
+            password,
+            pds_url,
+            auth_factor_token,
+            allow_takendown,
+        )
+        .await
+    }
+
+    /// Original function now calls the full implementation
     pub async fn try_login_before_creation(
         &self,
         handle: &str,
         password: &str,
         pds_url: &str,
     ) -> Result<ClientLoginResponse, ClientError> {
-        crate::services::client::auth::try_login_before_creation_impl(
-            self, handle, password, pds_url,
+        self.try_login_before_creation_full(
+            handle, password, pds_url, None, // No auth factor token
+            None, // Default takendown behavior
         )
         .await
     }
+
+    // /// Try to login with new PDS credentials to check if account already exists
+    // #[instrument(skip(self, password), err)]
+    // pub async fn try_login_before_creation(
+    //     &self,
+    //     handle: &str,
+    //     password: &str,
+    //     pds_url: &str,
+    // ) -> Result<ClientLoginResponse, ClientError> {
+    //     crate::services::client::auth::try_login_before_creation_impl(
+    //         self, handle, password, pds_url,
+    //     )
+    //     .await
+    // }
 
     /// Create account on a PDS
     // NEWBOLD.md Step: goat account create --pds-host $NEWPDSHOST --existing-did $ACCOUNTDID --handle $NEWHANDLE --password $NEWPASSWORD --email $NEWEMAIL --invite-code $INVITECODE --service-auth $SERVICEAUTH (line 40-47)

@@ -250,10 +250,12 @@ pub async fn execute_migration_client_side(
                             // Retry login with the credentials from Form 3
                             match migration_client
                                 .pds_client
-                                .try_login_before_creation(
+                                .try_login_before_creation_full(
                                     &state.form3.handle,
                                     &state.form3.password,
-                                    &new_pds_url
+                                    &new_pds_url,
+                                    None, // No auth factor token yet
+                                    Some(true) // Allow takendown accounts
                                 )
                                 .await
                             {
@@ -273,15 +275,38 @@ pub async fn execute_migration_client_side(
                                     )));
                                     session
                                 }
-                                Ok(_) => {
-                                    // Login still failed
-                                    console_error!("[Migration] Account exists but cannot authenticate with provided credentials");
-                                    dispatch.call(MigrationAction::SetMigrationError(Some(
-                                        "Account already exists on new PDS but authentication failed. Please verify your password matches the existing account.".to_string()
-                                    )));
-                                    dispatch.call(MigrationAction::SetMigrating(false));
-                                    return;
-                                }
+                                    Ok(retry_response) if !retry_response.success && retry_response.session.is_none() => {
+                                        // Both failed - authentication completely failed
+                                        console_error!("[Migration] Authentication failed: {}", retry_response.message);
+                                        dispatch.call(MigrationAction::SetMigrationError(Some(
+                                            format!("Account exists but authentication failed: {}. Please check your password.", retry_response.message)
+                                        )));
+                                        dispatch.call(MigrationAction::SetMigrating(false));
+                                        return;
+                                    }
+                                    Ok(retry_response) if !retry_response.success && retry_response.session.is_some() => {
+                                        // Unusual case: failure reported but session provided (maybe partial success?)
+                                        console_warn!("[Migration] Login reported failure but provided session - attempting to continue");
+                                        retry_response.session.unwrap()
+                                    }
+                                    Ok(retry_response) if retry_response.success && retry_response.session.is_none() => {
+                                        // Success reported but no session - this is a PDS bug
+                                        console_error!("[Migration] PDS reported success but provided no session");
+                                        dispatch.call(MigrationAction::SetMigrationError(Some(
+                                            "PDS login succeeded but no session was returned. This appears to be a PDS implementation issue.".to_string()
+                                        )));
+                                        dispatch.call(MigrationAction::SetMigrating(false));
+                                        return;
+                                    }
+                                    Ok(_) => {
+                                        // Fallback for any other combination (shouldn't happen)
+                                        console_error!("[Migration] Unexpected login response state");
+                                        dispatch.call(MigrationAction::SetMigrationError(Some(
+                                            "Unexpected response from PDS during login".to_string()
+                                        )));
+                                        dispatch.call(MigrationAction::SetMigrating(false));
+                                        return;
+                                    }
                                 Err(e) => {
                                     console_error!("[Migration] Failed to retry login: {}", e);
                                     dispatch.call(MigrationAction::SetMigrationError(Some(
