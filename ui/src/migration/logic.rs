@@ -1,6 +1,5 @@
 //! Client-side migration logic using DNS-over-HTTPS and direct PDS operations
 //! This replaces server-side functions with browser-based implementations
-
 use crate::migration::steps::blob::execute_streaming_blob_migration;
 #[cfg(feature = "web")]
 use crate::services::client::{
@@ -238,13 +237,67 @@ pub async fn execute_migration_client_side(
                         session
                     }
                     Err(error) => {
-                        console_error!(
-                            "{}",
-                            format!("[Migration] Failed to create account: {}", error.clone())
-                        );
-                        dispatch.call(MigrationAction::SetMigrationError(Some(error)));
-                        dispatch.call(MigrationAction::SetMigrating(false));
-                        return;
+                        // Check if this is the specific "AlreadyExists without session" error
+                        if error.contains("Account creation failed with AlreadyExists but no session provided for resumption") {
+                            console_info!("[Migration] Account exists but no session provided - retrying login with provided credentials");
+                            dispatch.call(MigrationAction::SetMigrationStep(
+                                "Account already exists. Attempting to login with provided credentials...".to_string(),
+                            ));
+
+                            // Retry login with the credentials from Form 3
+                            match migration_client
+                                .pds_client
+                                .try_login_before_creation(
+                                    &state.form3.handle,
+                                    &state.form3.password,
+                                    &new_pds_url
+                                )
+                                .await
+                            {
+                                Ok(retry_response) if retry_response.success && retry_response.session.is_some() => {
+                                    console_info!("[Migration] Login retry successful - proceeding with existing account");
+                                    dispatch.call(MigrationAction::SetMigrationStep(
+                                        "Successfully logged into existing account. Continuing migration...".to_string(),
+                                    ));
+
+                                    let session = retry_response.session.unwrap();
+                                    // Store and continue with migration
+                                    if let Err(e) = LocalStorageManager::store_client_session_as_new(&session) {
+                                        console_warn!("Failed to store session: {}", e);
+                                    }
+                                    dispatch.call(MigrationAction::SetNewPdsSession(Some(
+                                        convert_to_api_session(&session),
+                                    )));
+                                    session
+                                }
+                                Ok(_) => {
+                                    // Login still failed
+                                    console_error!("[Migration] Account exists but cannot authenticate with provided credentials");
+                                    dispatch.call(MigrationAction::SetMigrationError(Some(
+                                        "Account already exists on new PDS but authentication failed. Please verify your password matches the existing account.".to_string()
+                                    )));
+                                    dispatch.call(MigrationAction::SetMigrating(false));
+                                    return;
+                                }
+                                Err(e) => {
+                                    console_error!("[Migration] Failed to retry login: {}", e);
+                                    dispatch.call(MigrationAction::SetMigrationError(Some(
+                                        format!("Account exists but login failed: {}. Please verify your credentials match the existing account.", e)
+                                    )));
+                                    dispatch.call(MigrationAction::SetMigrating(false));
+                                    return;
+                                }
+                            }
+                        } else {
+                            // Other errors - fail as before
+                            console_error!(
+                                "{}",
+                                format!("[Migration] Failed to create account: {}", error.clone())
+                            );
+                            dispatch.call(MigrationAction::SetMigrationError(Some(error)));
+                            dispatch.call(MigrationAction::SetMigrating(false));
+                            return;
+                        }
                     }
                 }
             }

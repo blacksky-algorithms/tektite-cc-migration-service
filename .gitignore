@@ -7,3 +7,5 @@
 **/*.rs.bk
 /old
 /indigo
+
+ANALYSIS.md
