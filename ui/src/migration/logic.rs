@@ -12,7 +12,6 @@ use crate::{console_error, console_info, console_warn};
 
 use crate::migration::{
     account_operations::{check_account_status_client_side, create_account_client_side},
-    session_management::convert_to_api_session,
     steps::{
         plc::setup_plc_transition_client_side, preferences::migrate_preferences_client_side,
         repository::migrate_repository_client_side,
@@ -206,7 +205,7 @@ pub async fn execute_migration_client_side(
                     );
                 }
                 dispatch.call(MigrationAction::SetNewPdsSession(Some(
-                    convert_to_api_session(&existing_session),
+                    (&existing_session).into(),
                 )));
 
                 existing_session
@@ -269,7 +268,7 @@ pub async fn execute_migration_client_side(
                                         console_warn!("Failed to store session: {}", e);
                                     }
                                     dispatch.call(MigrationAction::SetNewPdsSession(Some(
-                                        convert_to_api_session(&session),
+                                        (&session).into(),
                                     )));
                                     session
                                 }
@@ -331,7 +330,7 @@ pub async fn execute_migration_client_side(
         );
     }
     dispatch.call(MigrationAction::SetNewPdsSession(Some(
-        convert_to_api_session(&new_session),
+        (&new_session).into(),
     )));
 
     // Step 6: Verify account status

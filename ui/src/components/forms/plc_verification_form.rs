@@ -5,9 +5,7 @@ use crate::{console_error, console_info, console_warn};
 use crate::components::inputs::{InputType, ValidatedInput};
 use crate::migration::*;
 
-use crate::migration::{
-    session_management::convert_session_to_client, storage::LocalStorageManager,
-};
+use crate::migration::storage::LocalStorageManager;
 use crate::services::client::PdsClient;
 
 #[derive(Props, PartialEq, Clone)]
@@ -120,11 +118,11 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             // Get old and new sessions from localStorage
                             let old_session_result = LocalStorageManager::get_old_session()
                                 .map_err(|_| "Failed to get old PDS session")
-                                .map(|session| convert_session_to_client(&session));
+                                .map(|session| (&session).into());
 
                             let new_session_result = LocalStorageManager::get_new_session()
                                 .map_err(|_| "Failed to get new PDS session")
-                                .map(|session| convert_session_to_client(&session));
+                                .map(|session| (&session).into());
 
                             let old_session = match old_session_result {
                                 Ok(session) => session,
@@ -240,7 +238,7 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                             // Get old session again for deactivation
                             let old_session_for_deactivation = match LocalStorageManager::get_old_session()
                                 .map_err(|_| "Failed to get old PDS session")
-                                .map(|session| convert_session_to_client(&session)) {
+                                .map(|session| session.into()) {
                                 Ok(session) => session,
                                 Err(error) => {
                                     console_warn!("{}", format!("[Form4] Failed to get old session for deactivation: {}", error));

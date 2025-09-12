@@ -30,7 +30,7 @@ pub async fn execute_migration_client_side(
                 "[Migration] Old PDS session loaded successfully: {}",
                 session.did.clone()
             );
-            convert_session_to_client(&session)
+            (&session).into()
         }
         Err(error) => {
             console_error!(
@@ -57,7 +57,7 @@ pub async fn execute_migration_client_side(
         }
     };
 
-    let new_session = convert_session_to_client(&new_session_api);
+    let new_session = (&new_session_api).into();
 
     // Execute migration with retry logic (no complex resume capability)
     console_info!("[Migration] Starting fresh migration with retry capabilities");
@@ -187,18 +187,6 @@ async fn execute_full_migration(
     console_info!("[Migration] Migration completed successfully - ready for Form 4");
 
     Ok(())
-}
-
-/// Convert SessionCredentials to ClientSessionCredentials
-pub fn convert_session_to_client(session: &SessionCredentials) -> ClientSessionCredentials {
-    ClientSessionCredentials {
-        did: session.did.clone(),
-        handle: session.handle.clone(),
-        pds: session.pds.clone(),
-        access_jwt: session.access_jwt.clone(),
-        refresh_jwt: session.refresh_jwt.clone(),
-        expires_at: None, // Will be parsed from JWT if available
-    }
 }
 
 /// Verify account status and blob completeness before Form 4
