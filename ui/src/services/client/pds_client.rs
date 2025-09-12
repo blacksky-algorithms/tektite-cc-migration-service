@@ -74,6 +74,27 @@ impl PdsClient {
         .await
     }
 
+    /// Login to deactivated account by explicitly specifying PDS URL
+    /// This is equivalent to: goat account login --pds-host $NEWPDSHOST -u $ACCOUNTDID -p $NEWPASSWORD
+    /// Used for logging into accounts that exist but are deactivated during migration
+    #[instrument(skip(self, password), err)]
+    pub async fn login_with_explicit_pds(
+        &self,
+        did: &str,
+        password: &str,
+        pds_url: &str,
+    ) -> Result<ClientLoginResponse, ClientError> {
+        crate::services::client::auth::login::create_session_core(
+            self,
+            did, // Use DID as identifier
+            password,
+            pds_url,    // Explicitly specify PDS URL
+            None,       // No auth factor token
+            Some(true), // Allow takendown/deactivated accounts
+        )
+        .await
+    }
+
     // /// Try to login with new PDS credentials to check if account already exists
     // #[instrument(skip(self, password), err)]
     // pub async fn try_login_before_creation(
@@ -174,10 +195,19 @@ impl PdsClient {
         let response = self
             .http_client
             .get(&describe_url)
+            .timeout(std::time::Duration::from_secs(15)) // Specific timeout for describe_server
             .send()
             .await
-            .map_err(|e| ClientError::NetworkError {
-                message: format!("Failed to describe server: {}", e),
+            .map_err(|e| {
+                if e.is_timeout() {
+                    ClientError::NetworkError {
+                        message: format!("Request timed out after 15 seconds: {}", describe_url),
+                    }
+                } else {
+                    ClientError::NetworkError {
+                        message: format!("Failed to describe server: {}", e),
+                    }
+                }
             })?;
 
         if response.status().is_success() {

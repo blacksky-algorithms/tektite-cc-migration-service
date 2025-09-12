@@ -8,7 +8,7 @@ use crate::services::client::{ClientError, PdsClient};
 
 /// Core createSession implementation that all login functions use
 #[instrument(skip(client, password, auth_factor_token), err)]
-async fn create_session_core(
+pub async fn create_session_core(
     client: &PdsClient,
     identifier: &str,
     password: &str,
