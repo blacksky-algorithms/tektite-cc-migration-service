@@ -275,38 +275,38 @@ pub async fn execute_migration_client_side(
                                     )));
                                     session
                                 }
-                                    Ok(retry_response) if !retry_response.success && retry_response.session.is_none() => {
-                                        // Both failed - authentication completely failed
-                                        console_error!("[Migration] Authentication failed: {}", retry_response.message);
-                                        dispatch.call(MigrationAction::SetMigrationError(Some(
-                                            format!("Account exists but authentication failed: {}. Please check your password.", retry_response.message)
-                                        )));
-                                        dispatch.call(MigrationAction::SetMigrating(false));
-                                        return;
-                                    }
-                                    Ok(retry_response) if !retry_response.success && retry_response.session.is_some() => {
-                                        // Unusual case: failure reported but session provided (maybe partial success?)
-                                        console_warn!("[Migration] Login reported failure but provided session - attempting to continue");
-                                        retry_response.session.unwrap()
-                                    }
-                                    Ok(retry_response) if retry_response.success && retry_response.session.is_none() => {
-                                        // Success reported but no session - this is a PDS bug
-                                        console_error!("[Migration] PDS reported success but provided no session");
-                                        dispatch.call(MigrationAction::SetMigrationError(Some(
-                                            "PDS login succeeded but no session was returned. This appears to be a PDS implementation issue.".to_string()
-                                        )));
-                                        dispatch.call(MigrationAction::SetMigrating(false));
-                                        return;
-                                    }
-                                    Ok(_) => {
-                                        // Fallback for any other combination (shouldn't happen)
-                                        console_error!("[Migration] Unexpected login response state");
-                                        dispatch.call(MigrationAction::SetMigrationError(Some(
-                                            "Unexpected response from PDS during login".to_string()
-                                        )));
-                                        dispatch.call(MigrationAction::SetMigrating(false));
-                                        return;
-                                    }
+                                Ok(retry_response) if !retry_response.success && retry_response.session.is_none() => {
+                                    // Both failed - authentication completely failed
+                                    console_error!("[Migration] Authentication failed: {}", retry_response.message);
+                                    dispatch.call(MigrationAction::SetMigrationError(Some(
+                                        format!("Account exists but authentication failed: {}. Please check your password.", retry_response.message)
+                                    )));
+                                    dispatch.call(MigrationAction::SetMigrating(false));
+                                    return;
+                                }
+                                Ok(retry_response) if !retry_response.success && retry_response.session.is_some() => {
+                                    // Unusual case: failure reported but session provided (maybe partial success?)
+                                    console_warn!("[Migration] Login reported failure but provided session - attempting to continue");
+                                    retry_response.session.unwrap()
+                                }
+                                Ok(retry_response) if retry_response.success && retry_response.session.is_none() => {
+                                    // Success reported but no session - this is a PDS bug
+                                    console_error!("[Migration] PDS reported success but provided no session");
+                                    dispatch.call(MigrationAction::SetMigrationError(Some(
+                                        "PDS login succeeded but no session was returned. This appears to be a PDS implementation issue.".to_string()
+                                    )));
+                                    dispatch.call(MigrationAction::SetMigrating(false));
+                                    return;
+                                }
+                                Ok(_) => {
+                                    // Fallback for any other combination (shouldn't happen)
+                                    console_error!("[Migration] Unexpected login response state");
+                                    dispatch.call(MigrationAction::SetMigrationError(Some(
+                                        "Unexpected response from PDS during login".to_string()
+                                    )));
+                                    dispatch.call(MigrationAction::SetMigrating(false));
+                                    return;
+                                }
                                 Err(e) => {
                                     console_error!("[Migration] Failed to retry login: {}", e);
                                     dispatch.call(MigrationAction::SetMigrationError(Some(
@@ -463,7 +463,9 @@ async fn request_service_auth_token(
         )
     );
 
-    let exp_timestamp = (js_sys::Date::now() / 1000.0) as u64 + 3600; // 1 hour expiration
+    // FIX: https://github.com/blacksky-algorithms/tektite-cc-migration-service/issues/3
+    // There might be a discrepancy between client and PDS clock - set max expiry to 59 minutes
+    let exp_timestamp = (js_sys::Date::now() / 1000.0) as u64 + 3540; // 59 minute expiry
 
     match migration_client
         .pds_client
