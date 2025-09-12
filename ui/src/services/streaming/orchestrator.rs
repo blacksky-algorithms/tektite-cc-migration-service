@@ -182,8 +182,20 @@ impl SyncOrchestrator {
                                 id, retry_count, last_error
                             );
 
-                            // Progressive delay for retries
-                            let delay_ms = 1000 * retry_count as u64;
+                            // Check if this is a rate limiting error (504 Gateway Timeout from blob upload)
+                            let delay_ms = if last_error.starts_with("RATE_LIMIT:") {
+                                // Exponential backoff for rate limiting: 5s, 10s, 20s
+                                let base_delay = 5000; // 5 seconds base
+                                let exponential_delay = base_delay * (2_u64.pow(retry_count - 1));
+                                console_info!(
+                                    "[SyncOrchestrator] Rate limit detected for {}, applying exponential backoff: {}ms delay",
+                                    id, exponential_delay
+                                );
+                                exponential_delay
+                            } else {
+                                // Regular progressive delay for other errors
+                                1000 * retry_count as u64
+                            };
 
                             #[cfg(target_arch = "wasm32")]
                             TimeoutFuture::new(delay_ms as u32).await;

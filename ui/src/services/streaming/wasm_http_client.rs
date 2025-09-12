@@ -154,48 +154,25 @@ impl WasmHttpClient {
         console_debug!("[WasmHttpClient] Response: {} {}", status, status_text);
 
         if !response.ok() {
-            if status == 401 {
-                console_error!("[WasmHttpClient] Authentication failed (401)");
-                return Err(format!("Authentication failed (401 Unauthorized): {}. Check if access token is valid and has required permissions.", status_text));
-            }
-
-            // For 500 errors, try to get the response body for better debugging
-            if status == 500 {
-                console_error!(
-                    "[WasmHttpClient] Server error (500), attempting to read response body"
-                );
-
-                // Try to read the response body for better error information
-                // Note: We can't clone the Response after checking status, so we'll try to read it directly
-                // This consumes the response but gives us better error information
-                match response.text() {
-                    Ok(text_promise) => match JsFuture::from(text_promise).await {
-                        Ok(text_future) => {
-                            if let Some(error_body) = text_future.as_string() {
-                                console_error!(
-                                    "[WasmHttpClient] Server error body: {}",
-                                    error_body
-                                );
-                                return Err(format!(
-                                    "HTTP error: {} {} - Server response: {}",
-                                    status, status_text, error_body
-                                ));
-                            }
-                        }
-                        Err(_) => {
-                            console_error!(
-                                "[WasmHttpClient] Failed to parse response text as future"
-                            );
-                        }
-                    },
-                    Err(_) => {
-                        console_error!("[WasmHttpClient] Failed to get response text");
-                    }
+            match status {
+                401 => {
+                    console_error!("[WasmHttpClient] Authentication failed (401)");
+                    return Err(format!("Authentication failed (401 Unauthorized): {}. Check if access token is valid and has required permissions.", status_text));
+                }
+                504 => {
+                    console_error!("[WasmHttpClient] Gateway timeout (504) - server took too long to respond");
+                    return Err("Gateway timeout (504): The server took too long to respond. This may be due to server overload or network issues. Please try again later.".to_string());
+                }
+                500 => {
+                    console_error!("[WasmHttpClient] Server error (500)");
+                    return Err(format!("HTTP error: {} {}", status, status_text));
+                }
+                _ => {
+                    // Generic error handling for all other status codes
+                    console_error!("[WasmHttpClient] HTTP error: {} {}", status, status_text);
+                    return Err(format!("HTTP error: {} {}", status, status_text));
                 }
             }
-
-            console_error!("[WasmHttpClient] HTTP error: {} {}", status, status_text);
-            return Err(format!("HTTP error: {} {}", status, status_text));
         }
 
         console_debug!("[WasmHttpClient] POST request completed successfully");

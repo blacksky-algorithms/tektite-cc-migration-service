@@ -279,7 +279,13 @@ impl DataTarget for BlobTarget {
             .await
             .map_err(|e| {
                 console_error!("[BlobTarget] Upload failed for blob {}: {}", cid, e);
-                format!("Failed to upload blob {}: {}", cid, e)
+                
+                // Check if this is a rate limiting error (504 Gateway Timeout)
+                if e.contains("Gateway timeout (504)") {
+                    format!("RATE_LIMIT:Failed to upload blob {}: {}", cid, e)
+                } else {
+                    format!("Failed to upload blob {}: {}", cid, e)
+                }
             })?;
 
         console_debug!("[BlobTarget] Blob {} upload completed", cid);

@@ -30,6 +30,8 @@ bytes = "1.10"
 # Additional web APIs for enhanced client functionality
 js-sys = "0.3"
 web-sys = { version = "0.3", features = [
+    "AbortController",
+    "AbortSignal",
     "console",
     "Document",
     "Element",
