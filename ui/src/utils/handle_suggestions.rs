@@ -1,3 +1,4 @@
+use crate::console_info;
 use crate::migration::storage::LocalStorageManager;
 use crate::migration::types::PdsDescribeResponse;
 use crate::migration::{MigrationAction, MigrationState};
@@ -115,12 +116,15 @@ impl MigrationState {
     pub fn get_domain_suffix(&self) -> String {
         // Use selected domain if available
         if let Some(selected) = &self.form3.selected_domain {
+            console_info!("[GET_DOMAIN_SUFFIX] Selected domain: {}", selected.clone());
             return selected.clone();
         }
 
         // Otherwise use first available domain as default
         if let Some(describe_response) = &self.form2.describe_response {
             if let Some(domain) = describe_response.available_user_domains.first() {
+                let domain_clone = domain.clone();
+                console_info!("[GET_DOMAIN_SUFFIX] Selected domain: {}", domain_clone);
                 return domain.clone();
             }
         }
