@@ -206,7 +206,9 @@ impl WasmHttpClient {
                 }
                 504 => {
                     console_error!("[WasmHttpClient] Gateway timeout (504)");
-                    return Err("Gateway timeout (504): Server timeout, not a rate limit".to_string());
+                    return Err(
+                        "Gateway timeout (504): Server timeout, not a rate limit".to_string()
+                    );
                 }
                 500 => {
                     console_error!("[WasmHttpClient] Server error (500)");

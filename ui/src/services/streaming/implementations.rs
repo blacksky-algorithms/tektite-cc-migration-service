@@ -219,10 +219,13 @@ impl DataSource for BlobSource {
                 {
                     use tokio::time::{timeout, Duration};
                     // For non-WASM, use tokio timeout
-                    timeout(Duration::from_secs(30), self.client.get_json::<ListBlobsOutput>(&url))
-                        .await
-                        .map_err(|_| "Request timeout".to_string())
-                        .and_then(|result| result)
+                    timeout(
+                        Duration::from_secs(30),
+                        self.client.get_json::<ListBlobsOutput>(&url),
+                    )
+                    .await
+                    .map_err(|_| "Request timeout".to_string())
+                    .and_then(|result| result)
                 }
             };
 

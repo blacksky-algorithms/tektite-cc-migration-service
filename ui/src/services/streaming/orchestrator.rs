@@ -34,8 +34,6 @@ pub enum ProgressEvent {
     Completed, // Item/phase has completed
 }
 
-#[cfg(target_arch = "wasm32")]
-use gloo_timers::future::TimeoutFuture;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::time::{timeout, Duration};
 
