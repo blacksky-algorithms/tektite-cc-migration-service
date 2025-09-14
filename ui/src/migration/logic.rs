@@ -168,12 +168,6 @@ pub async fn execute_migration_client_side(
     // Use the PDS URL from form 2 (user already provided it)
     let new_pds_url = state.form2.pds_url.clone();
 
-    // TODO: Remove this once you feel comfortable
-    // Derive PDS URL for login attempt
-    // let new_pds_url = migration_client
-    //     .pds_client
-    //     .derive_pds_url_from_handle(&state.form3.handle);
-
     // NEWBOLD.md Step: goat account login --pds-host $NEWPDSHOST -u $ACCOUNTDID -p $NEWPASSWORD (line 52)
     // Try to login first to check if account already exists
     // Implements: goat account login --pds-host $NEWPDSHOST -u $ACCOUNTDID -p $NEWPASSWORD
