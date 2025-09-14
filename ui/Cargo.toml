@@ -55,7 +55,7 @@ thiserror = "2.0"
 cid = { version = "0.11.1", features = ["alloc", "std", "serde"] }
 
 # WASM-first tokio configuration (sync feature only)
-tokio = { version = "1.47", default-features = false, features = ["sync"] }
+tokio = { version = "1.47", default-features = false, features = ["macros", "sync", "rt"] }
 wasm-bindgen-test = "0.3"
 
 [dev-dependencies]

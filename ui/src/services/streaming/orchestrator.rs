@@ -178,29 +178,47 @@ impl SyncOrchestrator {
 
                         if retry_count <= MAX_RETRY_ATTEMPTS {
                             console_debug!(
-                                "[SyncOrchestrator] Failed to process item {} (attempt {}): {}. Retrying...",
+                                "[SyncOrchestrator] Failed to process item {} (attempt {}): {}. Analyzing error...",
                                 id, retry_count, last_error
                             );
 
-                            // Check if this is a rate limiting error (504 Gateway Timeout from blob upload)
-                            let delay_ms = if last_error.starts_with("RATE_LIMIT:") {
-                                // Exponential backoff for rate limiting: 5s, 10s, 20s
-                                let base_delay = 5000; // 5 seconds base
+                            // Parse rate limit error for intelligent retry
+                            let delay_ms = if last_error.starts_with("RATE_LIMIT:429:") {
+                                // Extract retry-after from error message
+                                // Format: "RATE_LIMIT:429:{retry_after}:..."
+                                let parts: Vec<&str> = last_error.split(':').collect();
+                                let retry_after_secs = parts
+                                    .get(2)
+                                    .and_then(|s| s.parse::<u64>().ok())
+                                    .unwrap_or(60);
+
+                                // Add jitter to prevent thundering herd
+                                let jitter = (retry_count as u64) * 1000; // 1-3 seconds jitter
+                                let delay = (retry_after_secs * 1000) + jitter;
+
+                                console_info!(
+                                    "[SyncOrchestrator] Rate limit detected for {}, waiting {}s as instructed by server (plus {}ms jitter)",
+                                    id, retry_after_secs, jitter
+                                );
+                                delay
+                            } else if last_error.contains("Gateway timeout (504)") {
+                                // Actual gateway timeout - use exponential backoff
+                                let base_delay = 2000; // 2 seconds base
                                 let exponential_delay = base_delay * (2_u64.pow(retry_count - 1));
                                 console_info!(
-                                    "[SyncOrchestrator] Rate limit detected for {}, applying exponential backoff: {}ms delay",
+                                    "[SyncOrchestrator] Gateway timeout for {}, using exponential backoff: {}ms",
                                     id, exponential_delay
                                 );
                                 exponential_delay
                             } else {
-                                // Regular progressive delay for other errors
+                                // Other errors - progressive delay
                                 1000 * retry_count as u64
                             };
 
                             #[cfg(target_arch = "wasm32")]
-                            TimeoutFuture::new(delay_ms as u32).await;
+                            gloo_timers::future::TimeoutFuture::new(delay_ms as u32).await;
                             #[cfg(not(target_arch = "wasm32"))]
-                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                         } else {
                             console_error!(
                                 "[SyncOrchestrator] Failed to process item {} after {} attempts: {}",

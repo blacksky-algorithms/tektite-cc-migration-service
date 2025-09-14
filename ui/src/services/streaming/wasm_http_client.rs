@@ -25,13 +25,6 @@ impl WasmHttpClient {
         let opts = RequestInit::new();
         opts.set_method("GET");
 
-        // Note: Removed compression headers to avoid potential ReadableStream issues in WASM
-        // let headers = Headers::new()
-        //     .map_err(|e| format!("Failed to create headers: {:?}", e))?;
-        // headers.set("Accept-Encoding", "gzip, deflate, br")
-        //     .map_err(|e| format!("Failed to set Accept-Encoding header: {:?}", e))?;
-        // opts.set_headers(&headers);
-
         let request = Request::new_with_str_and_init(url, &opts).map_err(|e| {
             console_error!("[WasmHttpClient] Failed to create request: {:?}", e);
             format!("Failed to create request: {:?}", e)
@@ -155,20 +148,71 @@ impl WasmHttpClient {
 
         if !response.ok() {
             match status {
+                429 => {
+                    // Parse rate limit headers
+                    let response_headers = response.headers();
+
+                    let limit = response_headers
+                        .get("RateLimit-Limit")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+
+                    let reset = response_headers
+                        .get("RateLimit-Reset")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<u64>().ok());
+
+                    let remaining = response_headers
+                        .get("RateLimit-Remaining")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+
+                    // Calculate retry delay based on reset time
+                    let retry_after = if let Some(reset_time) = reset {
+                        let now = (js_sys::Date::now() / 1000.0) as u64;
+                        if reset_time > now {
+                            reset_time - now
+                        } else {
+                            60 // Default to 1 minute if reset is in past
+                        }
+                    } else {
+                        60 // Default fallback
+                    };
+
+                    console_error!(
+                        "[WasmHttpClient] Rate limited (429): limit={:?}, remaining={:?}, retry_after={}s",
+                        limit.unwrap_or(0),
+                        remaining.unwrap_or(0),
+                        retry_after
+                    );
+
+                    return Err(format!(
+                        "RATE_LIMIT:429:{}:Limit={},Remaining={},RetryAfter={}",
+                        retry_after,
+                        limit.unwrap_or(1000),
+                        remaining.unwrap_or(0),
+                        retry_after
+                    ));
+                }
                 401 => {
                     console_error!("[WasmHttpClient] Authentication failed (401)");
-                    return Err(format!("Authentication failed (401 Unauthorized): {}. Check if access token is valid and has required permissions.", status_text));
+                    return Err(format!(
+                        "Authentication failed (401 Unauthorized): {}",
+                        status_text
+                    ));
                 }
                 504 => {
-                    console_error!("[WasmHttpClient] Gateway timeout (504) - server took too long to respond");
-                    return Err("Gateway timeout (504): The server took too long to respond. This may be due to server overload or network issues. Please try again later.".to_string());
+                    console_error!("[WasmHttpClient] Gateway timeout (504)");
+                    return Err("Gateway timeout (504): Server timeout, not a rate limit".to_string());
                 }
                 500 => {
                     console_error!("[WasmHttpClient] Server error (500)");
                     return Err(format!("HTTP error: {} {}", status, status_text));
                 }
                 _ => {
-                    // Generic error handling for all other status codes
                     console_error!("[WasmHttpClient] HTTP error: {} {}", status, status_text);
                     return Err(format!("HTTP error: {} {}", status, status_text));
                 }

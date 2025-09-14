@@ -247,20 +247,23 @@ impl<const CAPACITY: usize> ChannelTee<CAPACITY> {
         );
 
         for (i, tx) in self.channels.iter().enumerate() {
-            #[cfg(target_arch = "wasm32")]
-            {
-                // WASM version: Use try_send for immediate backpressure detection
-                match tx.try_send(chunk.clone()) {
-                    Ok(()) => {
-                        console_debug!(
-                            "[ChannelTee] Successfully sent chunk to channel {} immediately",
-                            i
-                        );
-                    }
-                    Err(mpsc::error::TrySendError::Full(_)) => {
-                        console_warn!("[ChannelTee] Backpressure detected on channel {}, consumer may be slow", i);
+            // WASM version: Use try_send for immediate backpressure detection
+            match tx.try_send(chunk.clone()) {
+                Ok(()) => {
+                    console_debug!(
+                        "[ChannelTee] Successfully sent chunk to channel {} immediately",
+                        i
+                    );
+                }
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    console_warn!(
+                        "[ChannelTee] Backpressure detected on channel {}, consumer may be slow",
+                        i
+                    );
 
-                        // Wait briefly and try blocking send
+                    // Wait briefly and try blocking send
+                    #[cfg(target_arch = "wasm32")]
+                    {
                         TimeoutFuture::new(100).await;
 
                         // Add timeout detection for blocking send
@@ -268,7 +271,11 @@ impl<const CAPACITY: usize> ChannelTee<CAPACITY> {
                         match tx.send(chunk.clone()).await {
                             Ok(()) => {
                                 let send_duration = js_sys::Date::now() - send_start;
-                                console_info!("[ChannelTee] Recovered from backpressure on channel {} in {:.1}ms", i, send_duration);
+                                console_info!(
+                                    "[ChannelTee] Recovered from backpressure on channel {} in {:.1}ms",
+                                    i,
+                                    send_duration
+                                );
                             }
                             Err(_) => {
                                 console_error!(
@@ -294,27 +301,10 @@ impl<const CAPACITY: usize> ChannelTee<CAPACITY> {
                             );
                         }
                     }
-                    Err(mpsc::error::TrySendError::Closed(_)) => {
-                        console_error!("[ChannelTee] Channel {} closed unexpectedly", i);
-                        return Err(format!("Channel {} closed unexpectedly", i).into());
-                    }
-                }
-            }
 
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                // Non-WASM version: Use timeout-based approach
-                const SEND_TIMEOUT: Duration = Duration::from_millis(100);
-
-                match timeout(SEND_TIMEOUT, tx.send(chunk.clone())).await {
-                    Ok(Ok(())) => {
-                        // Successfully sent
-                    }
-                    Ok(Err(_)) => {
-                        return Err(format!("Channel {} closed unexpectedly", i).into());
-                    }
-                    Err(_) => {
-                        console_warn!("[ChannelTee] Backpressure detected on channel {}, consumer may be slow", i);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        use tokio::time::{timeout, Duration};
 
                         // Try again with a longer timeout
                         match timeout(Duration::from_millis(1000), tx.send(chunk.clone())).await {
@@ -340,6 +330,10 @@ impl<const CAPACITY: usize> ChannelTee<CAPACITY> {
                             }
                         }
                     }
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    console_error!("[ChannelTee] Channel {} closed unexpectedly", i);
+                    return Err(format!("Channel {} closed unexpectedly", i).into());
                 }
             }
         }
