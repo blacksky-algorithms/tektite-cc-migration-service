@@ -4,7 +4,7 @@ use super::browser_storage::BrowserStorage;
 use super::traits::*;
 use super::wasm_http_client::WasmHttpClient;
 use crate::services::client::ClientSessionCredentials;
-use crate::{console_debug, console_error, console_info};
+use crate::{console_debug, console_error, console_info, console_warn};
 use async_trait::async_trait;
 use std::error::Error;
 
@@ -180,28 +180,96 @@ impl DataSource for BlobSource {
     type Item = String; // CID
 
     async fn list_items(&self) -> Result<Vec<Self::Item>, Box<dyn Error>> {
-        let url = format!(
-            "{}/xrpc/com.atproto.sync.listBlobs?did={}",
-            self.pds_url, self.did
+        let mut all_cids = Vec::new();
+        let mut cursor: Option<String> = None;
+        const BATCH_SIZE: i64 = 100; // Small batches to avoid timeouts
+
+        console_info!(
+            "[BlobSource] Starting paginated blob listing for DID: {}",
+            self.did
         );
 
-        console_info!("[BlobSource] Listing blobs from: {}", url);
+        loop {
+            // Build URL with pagination parameters
+            let mut url = format!(
+                "{}/xrpc/com.atproto.sync.listBlobs?did={}&limit={}",
+                self.pds_url, self.did, BATCH_SIZE
+            );
 
-        #[derive(serde::Deserialize)]
-        struct ListBlobsOutput {
-            cids: Vec<String>,
-            #[allow(dead_code)]
-            cursor: Option<String>,
+            if let Some(ref c) = cursor {
+                url.push_str(&format!("&cursor={}", c));
+            }
+
+            console_debug!("[BlobSource] Fetching blob batch from: {}", url);
+
+            #[derive(serde::Deserialize)]
+            struct ListBlobsOutput {
+                cids: Vec<String>,
+                cursor: Option<String>,
+            }
+
+            // Add timeout to detect hangs (using WASM-compatible approach)
+            let result = {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // For WASM, we rely on browser fetch timeout instead of implementing our own
+                    self.client.get_json::<ListBlobsOutput>(&url).await
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    use tokio::time::{timeout, Duration};
+                    // For non-WASM, use tokio timeout
+                    timeout(Duration::from_secs(30), self.client.get_json::<ListBlobsOutput>(&url))
+                        .await
+                        .map_err(|_| "Request timeout".to_string())
+                        .and_then(|result| result)
+                }
+            };
+
+            match result {
+                Ok(response) => {
+                    let batch_count = response.cids.len();
+                    all_cids.extend(response.cids);
+
+                    console_info!(
+                        "[BlobSource] Fetched {} blobs in this batch, {} total so far",
+                        batch_count,
+                        all_cids.len()
+                    );
+
+                    cursor = response.cursor;
+
+                    // If no cursor or empty cursor, we're done
+                    if cursor.is_none() || cursor.as_ref().is_some_and(|c| c.is_empty()) {
+                        break;
+                    }
+
+                    // Small delay between requests to avoid overwhelming the server
+                    #[cfg(target_arch = "wasm32")]
+                    gloo_timers::future::TimeoutFuture::new(100).await;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    // If we have some results, return them; otherwise propagate error
+                    if !all_cids.is_empty() {
+                        console_warn!(
+                            "[BlobSource] Error fetching batch, returning {} blobs collected so far: {}",
+                            all_cids.len(), e
+                        );
+                        break;
+                    } else {
+                        return Err(format!("Failed to list blobs: {}", e).into());
+                    }
+                }
+            }
         }
 
-        let response: ListBlobsOutput = self
-            .client
-            .get_json(&url)
-            .await
-            .map_err(|e| format!("Failed to list blobs: {}", e))?;
-
-        console_info!("[BlobSource] Found {} blobs", response.cids.len());
-        Ok(response.cids)
+        console_info!(
+            "[BlobSource] Completed blob listing: {} total blobs",
+            all_cids.len()
+        );
+        Ok(all_cids)
     }
 
     async fn fetch_stream(&self, cid: &Self::Item) -> Result<BrowserStream, Box<dyn Error>> {
@@ -279,7 +347,7 @@ impl DataTarget for BlobTarget {
             .await
             .map_err(|e| {
                 console_error!("[BlobTarget] Upload failed for blob {}: {}", cid, e);
-                
+
                 // Check if this is a rate limiting error (504 Gateway Timeout)
                 if e.contains("Gateway timeout (504)") {
                     format!("RATE_LIMIT:Failed to upload blob {}: {}", cid, e)

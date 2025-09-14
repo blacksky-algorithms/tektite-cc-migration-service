@@ -18,8 +18,10 @@ pub async fn execute_streaming_blob_migration(
     state: &MigrationState,
 ) -> Result<(), String> {
     console_info!("[Migration] Starting blob migration using streaming architecture");
+
+    // UPDATE UI IMMEDIATELY before any async operations
     dispatch.call(MigrationAction::SetMigrationStep(
-        "Starting blob migration with streaming...".to_string(),
+        "Listing blobs from source PDS...".to_string(),
     ));
 
     // Create WASM streaming orchestrator
@@ -29,11 +31,33 @@ pub async fn execute_streaming_blob_migration(
     let source = BlobSource::new(old_session);
     let target = BlobTarget::new(new_session);
 
-    // Pre-fetch blob counts to initialize progress callback with correct totals
+    // Show progress during source listing
+    dispatch.call(MigrationAction::SetMigrationStep(
+        "Fetching blob list from source PDS (this may take a moment for large accounts)..."
+            .to_string(),
+    ));
+
+    // Pre-fetch blob counts with timeout
     let source_items = source
         .list_items()
         .await
         .map_err(|e| format!("Failed to list source blobs: {}", e))?;
+
+    // Early exit if no blobs
+    if source_items.is_empty() {
+        console_info!("[Migration] No blobs to migrate, skipping blob phase");
+        dispatch.call(MigrationAction::SetMigrationStep(
+            "No blobs found - skipping blob migration".to_string(),
+        ));
+        return Ok(());
+    }
+
+    // Update with actual count
+    dispatch.call(MigrationAction::SetMigrationStep(format!(
+        "Found {} blobs, checking for missing blobs...",
+        source_items.len()
+    )));
+
     let missing_items = target
         .list_missing()
         .await
