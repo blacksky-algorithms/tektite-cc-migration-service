@@ -340,17 +340,16 @@ impl SyncOrchestrator {
                 result.map(|chunk| (chunk, s))
             });
 
-            #[cfg(not(target_arch = "wasm32"))]
-            let stream_iter = futures_util::stream::unfold(stream, |mut s| async {
-                match timeout(Duration::from_secs(STREAM_TIMEOUT_SECS), s.next()).await {
-                    Ok(Some(chunk)) => Some((Ok(chunk), s)),
-                    Ok(None) => None,
-                    Err(_) => Some((
-                        Err("Stream timeout - no data received for 30 seconds".to_string()),
-                        s,
-                    )),
-                }
-            });
+            // #[cfg(not(target_arch = "wasm32"))]
+            // let stream_iter = futures_util::stream::unfold(stream, |mut s| async {
+            //     match timeout(Duration::from_secs(STREAM_TIMEOUT_SECS), s.next()).await {
+            //         Ok(result) => result.map(|chunk| (chunk, s)),
+            //         Err(_) => Some((
+            //             Err("Stream timeout - no data received for 30 seconds".to_string()),
+            //             s,
+            //         )),
+            //     }
+            // });
 
             futures_util::pin_mut!(stream_iter);
             console_debug!(

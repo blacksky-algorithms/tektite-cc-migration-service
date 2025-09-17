@@ -69,6 +69,8 @@ pub async fn create_session_core(
                 message: format!("Account is not active (status: {})", status_msg),
                 did: Some(session_data["did"].as_str().unwrap_or_default().to_string()),
                 session: None,
+                active: Some(is_active),
+                status: status.map(|s| s.to_string()),
             });
         }
 
@@ -89,6 +91,8 @@ pub async fn create_session_core(
                 message: "Login succeeded but no session tokens provided".to_string(),
                 did: Some(session_data["did"].as_str().unwrap_or_default().to_string()),
                 session: None,
+                active: Some(is_active),
+                status: status.map(|s| s.to_string()),
             });
         }
 
@@ -124,6 +128,8 @@ pub async fn create_session_core(
             },
             did: Some(session.did.clone()),
             session: Some(session),
+            active: Some(is_active),
+            status: status.map(|s| s.to_string()),
         })
     } else {
         // Handle error responses
@@ -148,6 +154,8 @@ pub async fn create_session_core(
                     message: "Two-factor authentication required".to_string(),
                     did: None,
                     session: None,
+                    active: None,
+                    status: None,
                 });
             }
 
@@ -156,6 +164,8 @@ pub async fn create_session_core(
                 message: format!("{}: {}", error_code, message),
                 did: None,
                 session: None,
+                active: None,
+                status: None,
             })
         } else {
             Ok(ClientLoginResponse {
@@ -163,6 +173,8 @@ pub async fn create_session_core(
                 message: format!("Login failed: {}", error_text),
                 did: None,
                 session: None,
+                active: None,
+                status: None,
             })
         }
     }

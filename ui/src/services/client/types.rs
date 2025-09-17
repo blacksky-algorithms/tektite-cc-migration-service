@@ -6,7 +6,7 @@ use js_sys;
 
 /// Get current time in seconds since UNIX epoch (WASM compatible)
 #[cfg(target_arch = "wasm32")]
-fn current_time_secs() -> u64 {
+pub fn current_time_secs() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
 
@@ -105,6 +105,8 @@ pub struct ClientLoginResponse {
     pub message: String,
     pub did: Option<String>,
     pub session: Option<ClientSessionCredentials>,
+    pub active: Option<bool>,
+    pub status: Option<String>, // "takendown", "suspended", "deactivated"
 }
 
 /// Account creation request

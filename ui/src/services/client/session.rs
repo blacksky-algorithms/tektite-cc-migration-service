@@ -2,17 +2,8 @@ use anyhow::Result;
 use gloo_storage::{LocalStorage, SessionStorage, Storage};
 use tracing::{info, warn};
 
-#[cfg(target_arch = "wasm32")]
-use js_sys;
-
-/// Get current time in seconds since UNIX epoch (WASM compatible)
-#[cfg(target_arch = "wasm32")]
-fn current_time_secs() -> u64 {
-    (js_sys::Date::now() / 1000.0) as u64
-}
-
 use super::errors::ClientError;
-use super::types::ClientSessionCredentials;
+use super::types::{current_time_secs, ClientSessionCredentials};
 use crate::migration::types::MigrationProgress;
 
 /// Session manager for secure credential storage and management

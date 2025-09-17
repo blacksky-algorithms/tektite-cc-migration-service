@@ -20,7 +20,6 @@ use crate::migration::{
     types::{MigrationAction, MigrationState},
     validation::verify_and_complete_blob_migration,
 };
-// blob_opfs_storage::OpfsBlobManager, blob_storage::create_blob_manager,
 
 /// Client-side migration execution
 #[cfg(feature = "web")]
@@ -262,8 +261,12 @@ pub async fn execute_migration_client_side(
                                     session
                                 }
                                 Ok(login_response) if !login_response.success => {
-                                    // Check if this is the expected deactivated account scenario
-                                    if login_response.message.contains("Account is not active (status: deactivated)") {
+                                    // Check if this is the expected deactivated account scenario using structured fields first
+                                    let is_deactivated = login_response.status.as_deref() == Some("deactivated")
+                                        || (login_response.active == Some(false) && login_response.status.as_deref() == Some("deactivated"))
+                                        || login_response.message.contains("Account is not active (status: deactivated)");
+
+                                    if is_deactivated {
                                         console_info!("[Migration] Account deactivated as expected - trying explicit PDS login");
                                         dispatch.call(MigrationAction::SetMigrationStep(
                                             "Account exists but is deactivated (normal for migration). Attempting explicit login...".to_string(),
