@@ -15,6 +15,7 @@ pub mod errors;
 pub mod identity_resolver;
 pub mod pds_client;
 pub mod session;
+pub mod session_refresh;
 pub mod types;
 
 #[cfg(test)]
@@ -69,6 +70,7 @@ pub use identity_resolver::{
 };
 pub use pds_client::PdsClient;
 pub use session::{JwtUtils, MigrationSessionManager, SessionManager};
+pub use session_refresh::RefreshableSessionProvider;
 
 /// Convenience factory for creating a complete client setup
 pub struct MigrationClient {

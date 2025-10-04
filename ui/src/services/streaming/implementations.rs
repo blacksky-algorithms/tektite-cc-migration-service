@@ -3,7 +3,7 @@
 use super::browser_storage::BrowserStorage;
 use super::traits::*;
 use super::wasm_http_client::WasmHttpClient;
-use crate::services::client::ClientSessionCredentials;
+use crate::services::client::{ClientSessionCredentials, RefreshableSessionProvider};
 use crate::{console_debug, console_error, console_info, console_warn};
 use async_trait::async_trait;
 use std::error::Error;
@@ -73,16 +73,28 @@ impl DataSource for RepoSource {
 pub struct RepoTarget {
     pub pds_url: String,
     pub client: WasmHttpClient,
-    pub access_token: String,
+    pub session_provider: RefreshableSessionProvider,
 }
 
 impl RepoTarget {
-    pub fn new(session: &ClientSessionCredentials) -> Self {
+    pub fn new(session_provider: RefreshableSessionProvider) -> Self {
         Self {
-            pds_url: session.pds.clone(),
+            pds_url: String::new(), // Will be populated from session
             client: WasmHttpClient::new(),
-            access_token: session.access_jwt.clone(),
+            session_provider,
         }
+    }
+
+    /// Legacy constructor for backward compatibility
+    /// This will be deprecated in favor of new()
+    pub fn from_session(session: &ClientSessionCredentials) -> Self {
+        // Note: This creates a RefreshableSessionProvider without refresh capability
+        // since we don't have a PdsClient. This should only be used in tests.
+        use crate::services::client::PdsClient;
+        use std::sync::Arc;
+        let client = Arc::new(PdsClient::new());
+        let provider = RefreshableSessionProvider::new(session.clone(), client);
+        Self::new(provider)
     }
 }
 
@@ -94,22 +106,64 @@ impl DataTarget for RepoTarget {
         data: Vec<u8>,
         _content_type: &str,
     ) -> Result<(), Box<dyn Error>> {
-        let url = format!("{}/xrpc/com.atproto.repo.importRepo", self.pds_url);
+        // Get fresh token with automatic refresh
+        let access_token = self
+            .session_provider
+            .get_fresh_token()
+            .await
+            .map_err(|e| format!("Failed to get fresh token: {}", e))?;
+
+        // Get PDS URL from session
+        let session = self.session_provider.get_session().await;
+        let url = format!("{}/xrpc/com.atproto.repo.importRepo", session.pds);
 
         console_info!(
-            "[RepoTarget] Uploading repository to: {} with authentication",
+            "[RepoTarget] Uploading repository to: {} with fresh authentication",
             url
         );
 
-        self.client
+        // Try upload with fresh token
+        let result = self
+            .client
             .post_data_with_auth(
                 &url,
-                data,
+                data.clone(),
                 "application/vnd.ipld.car",
-                Some(&self.access_token),
+                Some(&access_token),
             )
-            .await
-            .map_err(|e| format!("Failed to upload repo: {}", e))?;
+            .await;
+
+        // If we get a 401, force refresh and retry once
+        if let Err(ref e) = result {
+            if e.contains("401") || e.contains("Unauthorized") {
+                console_warn!("[RepoTarget] Got 401 error, forcing token refresh and retrying...");
+
+                // Force refresh the token
+                let refreshed_token = self
+                    .session_provider
+                    .force_refresh()
+                    .await
+                    .map_err(|e| format!("Failed to refresh token after 401: {}", e))?;
+
+                // Retry the upload with refreshed token
+                self.client
+                    .post_data_with_auth(
+                        &url,
+                        data,
+                        "application/vnd.ipld.car",
+                        Some(&refreshed_token),
+                    )
+                    .await
+                    .map_err(|e| format!("Failed to upload repo after token refresh: {}", e))?;
+
+                console_info!(
+                    "[RepoTarget] Repository upload completed successfully after token refresh"
+                );
+                return Ok(());
+            }
+        }
+
+        result.map_err(|e| format!("Failed to upload repo: {}", e))?;
 
         console_info!("[RepoTarget] Repository upload completed successfully");
         Ok(())
@@ -299,16 +353,28 @@ impl DataSource for BlobSource {
 pub struct BlobTarget {
     pub pds_url: String,
     pub client: WasmHttpClient,
-    pub access_token: String,
+    pub session_provider: RefreshableSessionProvider,
 }
 
 impl BlobTarget {
-    pub fn new(session: &ClientSessionCredentials) -> Self {
+    pub fn new(session_provider: RefreshableSessionProvider) -> Self {
         Self {
-            pds_url: session.pds.clone(),
+            pds_url: String::new(), // Will be populated from session
             client: WasmHttpClient::new(),
-            access_token: session.access_jwt.clone(),
+            session_provider,
         }
+    }
+
+    /// Legacy constructor for backward compatibility
+    /// This will be deprecated in favor of new()
+    pub fn from_session(session: &ClientSessionCredentials) -> Self {
+        // Note: This creates a RefreshableSessionProvider without refresh capability
+        // since we don't have a PdsClient. This should only be used in tests.
+        use crate::services::client::PdsClient;
+        use std::sync::Arc;
+        let client = Arc::new(PdsClient::new());
+        let provider = RefreshableSessionProvider::new(session.clone(), client);
+        Self::new(provider)
     }
 }
 
@@ -320,54 +386,121 @@ impl DataTarget for BlobTarget {
         data: Vec<u8>,
         _content_type: &str,
     ) -> Result<(), Box<dyn Error>> {
-        // Basic token validation
-        if self.access_token.is_empty() {
-            return Err("Access token is empty - authentication required for blob upload".into());
-        }
+        // Get fresh token with automatic refresh
+        let access_token = self
+            .session_provider
+            .get_fresh_token()
+            .await
+            .map_err(|e| format!("Failed to get fresh token for blob {}: {}", cid, e))?;
 
         // Basic JWT format validation (should have 3 parts separated by dots)
-        let token_parts: Vec<&str> = self.access_token.split('.').collect();
+        let token_parts: Vec<&str> = access_token.split('.').collect();
         if token_parts.len() != 3 {
             return Err("Invalid JWT token format - expected 3 parts separated by dots".into());
         }
 
-        let url = format!("{}/xrpc/com.atproto.repo.uploadBlob", self.pds_url);
+        // Get PDS URL from session
+        let session = self.session_provider.get_session().await;
+        let url = format!("{}/xrpc/com.atproto.repo.uploadBlob", session.pds);
 
         console_debug!(
-            "[BlobTarget] Uploading blob {} to: {} with authentication (token length: {})",
+            "[BlobTarget] Uploading blob {} to: {} with fresh authentication (token length: {})",
             cid,
             url,
-            self.access_token.len()
+            access_token.len()
         );
 
-        self.client
+        // Try upload with fresh token
+        let result = self
+            .client
             .post_data_with_auth(
                 &url,
-                data,
+                data.clone(),
                 "application/octet-stream",
-                Some(&self.access_token),
+                Some(&access_token),
             )
-            .await
-            .map_err(|e| {
-                console_error!("[BlobTarget] Upload failed for blob {}: {}", cid, e);
+            .await;
 
-                // Check if this is a rate limiting error (504 Gateway Timeout)
-                if e.contains("Gateway timeout (504)") {
-                    format!("RATE_LIMIT:Failed to upload blob {}: {}", cid, e)
+        // Handle errors with potential token refresh retry
+        match result {
+            Ok(_) => {
+                console_debug!("[BlobTarget] Blob {} upload completed", cid);
+                Ok(())
+            }
+            Err(e) => {
+                // Check if this is an auth error (401)
+                if e.contains("401") || e.contains("Unauthorized") {
+                    console_warn!(
+                        "[BlobTarget] Got 401 error for blob {}, forcing token refresh and retrying...",
+                        cid
+                    );
+
+                    // Force refresh the token
+                    let refreshed_token =
+                        self.session_provider
+                            .force_refresh()
+                            .await
+                            .map_err(|refresh_err| {
+                                format!(
+                                    "Failed to refresh token after 401 for blob {}: {}",
+                                    cid, refresh_err
+                                )
+                            })?;
+
+                    // Retry the upload with refreshed token
+                    self.client
+                        .post_data_with_auth(
+                            &url,
+                            data,
+                            "application/octet-stream",
+                            Some(&refreshed_token),
+                        )
+                        .await
+                        .map_err(|retry_err| {
+                            console_error!(
+                                "[BlobTarget] Upload failed for blob {} after token refresh: {}",
+                                cid,
+                                retry_err
+                            );
+                            format!(
+                                "Failed to upload blob {} after token refresh: {}",
+                                cid, retry_err
+                            )
+                        })?;
+
+                    console_debug!(
+                        "[BlobTarget] Blob {} upload completed after token refresh",
+                        cid
+                    );
+                    Ok(())
                 } else {
-                    format!("Failed to upload blob {}: {}", cid, e)
-                }
-            })?;
+                    // Not an auth error - check for rate limiting
+                    console_error!("[BlobTarget] Upload failed for blob {}: {}", cid, e);
 
-        console_debug!("[BlobTarget] Blob {} upload completed", cid);
-        Ok(())
+                    if e.contains("Gateway timeout (504)") {
+                        Err(format!("RATE_LIMIT:Failed to upload blob {}: {}", cid, e).into())
+                    } else {
+                        Err(format!("Failed to upload blob {}: {}", cid, e).into())
+                    }
+                }
+            }
+        }
     }
 
     async fn list_missing(&self) -> Result<Vec<String>, Box<dyn Error>> {
-        let url = format!("{}/xrpc/com.atproto.repo.listMissingBlobs", self.pds_url);
+        // Get fresh token with automatic refresh
+        let access_token = self
+            .session_provider
+            .get_fresh_token()
+            .await
+            .map_err(|e| format!("Failed to get fresh token: {}", e))?;
+
+        // Get PDS URL from session
+        let session = self.session_provider.get_session().await;
+        let url = format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
 
         console_info!(
-            "[BlobTarget] Listing missing blobs from: {} with authentication",
+            "[BlobTarget] Listing missing blobs from: {} with fresh authentication",
             url
         );
 
@@ -388,7 +521,7 @@ impl DataTarget for BlobTarget {
 
         let response: ListMissingBlobsOutput = self
             .client
-            .get_json_with_auth(&url, Some(&self.access_token))
+            .get_json_with_auth(&url, Some(&access_token))
             .await
             .map_err(|e| format!("Failed to list missing blobs: {}", e))?;
 

@@ -1,9 +1,10 @@
 //! Repository migration step - WASM-first implementation
 
-use crate::services::client::ClientSessionCredentials;
+use crate::services::client::{ClientSessionCredentials, PdsClient, RefreshableSessionProvider};
 use crate::services::streaming::{BufferedStorage, RepoSource, RepoTarget, SyncOrchestrator};
 use crate::{console_debug, console_error, console_info, console_warn};
 use dioxus::prelude::*;
+use std::sync::Arc;
 
 use crate::migration::types::*;
 
@@ -23,9 +24,16 @@ pub async fn migrate_repository_client_side(
     // Create WASM streaming orchestrator
     let orchestrator = SyncOrchestrator::new();
 
+    // Create PdsClient for session refresh
+    let pds_client = Arc::new(PdsClient::new());
+
+    // Wrap new session in RefreshableSessionProvider for automatic token refresh
+    let new_session_provider =
+        RefreshableSessionProvider::new(new_session.clone(), Arc::clone(&pds_client));
+
     // Create source, target, and storage using WASM clients
     let source = RepoSource::new(old_session);
-    let target = RepoTarget::new(new_session);
+    let target = RepoTarget::new(new_session_provider);
     let storage = BufferedStorage::new(format!("repos/{}", old_session.did))
         .await
         .map_err(|e| format!("Failed to create storage: {}", e))?;

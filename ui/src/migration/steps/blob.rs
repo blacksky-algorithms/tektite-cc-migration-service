@@ -1,13 +1,14 @@
 //! Blob migration step using streaming architecture
 
 #[cfg(feature = "web")]
-use crate::services::client::ClientSessionCredentials;
+use crate::services::client::{ClientSessionCredentials, PdsClient, RefreshableSessionProvider};
 use crate::services::streaming::{
     BlobSource, BlobTarget, BufferedStorage, DataSource, DataTarget, ProgressEvent, ProgressPhase,
     ProgressUpdate, SyncOrchestrator,
 };
 use crate::{console_error, console_info, console_warn};
 use dioxus::prelude::*;
+use std::sync::Arc;
 
 use crate::migration::types::*;
 
@@ -27,9 +28,16 @@ pub async fn execute_streaming_blob_migration(
     // Create WASM streaming orchestrator
     let orchestrator = SyncOrchestrator::new();
 
+    // Create PdsClient for session refresh
+    let pds_client = Arc::new(PdsClient::new());
+
+    // Wrap sessions in RefreshableSessionProvider for automatic token refresh
+    let new_session_provider =
+        RefreshableSessionProvider::new(new_session.clone(), Arc::clone(&pds_client));
+
     // Create source and target using WASM clients
     let source = BlobSource::new(old_session);
-    let target = BlobTarget::new(new_session);
+    let target = BlobTarget::new(new_session_provider);
 
     // Show progress during source listing
     dispatch.call(MigrationAction::SetMigrationStep(
