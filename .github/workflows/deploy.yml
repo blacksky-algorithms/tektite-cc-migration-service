@@ -42,6 +42,7 @@ jobs:
         run: |
           if ! command -v dx &> /dev/null; then
             echo "Installing Dioxus CLI..."
+            curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
             cargo binstall dioxus-cli@0.6.3 --force
           else
             echo "Dioxus CLI already installed: $(dx --version)"
