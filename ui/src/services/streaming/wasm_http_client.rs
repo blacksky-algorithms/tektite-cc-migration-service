@@ -16,6 +16,95 @@ impl WasmHttpClient {
         Self
     }
 
+    /// Helper method to add authorization header if token is provided
+    fn add_auth_header(headers: &Headers, auth_token: Option<&str>) -> Result<(), String> {
+        if let Some(token) = auth_token {
+            headers
+                .set("Authorization", &format!("Bearer {}", token))
+                .map_err(|e| format!("Failed to set Authorization header: {:?}", e))?;
+            console_debug!("[WasmHttpClient] Authorization header added");
+        }
+        Ok(())
+    }
+
+    /// Handle HTTP error responses with unified error handling
+    fn handle_error_response(response: &Response) -> Result<(), String> {
+        let status = response.status();
+        let status_text = response.status_text();
+
+        match status {
+            200..=299 => Ok(()),
+            401 => {
+                console_error!("[WasmHttpClient] Authentication failed (401)");
+                Err(format!(
+                    "Authentication failed (401 Unauthorized): {}. Check if access token is valid and has required permissions.",
+                    status_text
+                ))
+            }
+            429 => {
+                // Parse rate limit headers
+                let response_headers = response.headers();
+
+                let limit = response_headers
+                    .get("RateLimit-Limit")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<i32>().ok());
+
+                let reset = response_headers
+                    .get("RateLimit-Reset")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<u64>().ok());
+
+                let remaining = response_headers
+                    .get("RateLimit-Remaining")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<i32>().ok());
+
+                // Calculate retry delay based on reset time
+                let retry_after = if let Some(reset_time) = reset {
+                    let now = (js_sys::Date::now() / 1000.0) as u64;
+                    if reset_time > now {
+                        reset_time - now
+                    } else {
+                        60 // Default to 1 minute if reset is in past
+                    }
+                } else {
+                    60 // Default fallback
+                };
+
+                console_error!(
+                    "[WasmHttpClient] Rate limited (429): limit={:?}, remaining={:?}, retry_after={}s",
+                    limit.unwrap_or(0),
+                    remaining.unwrap_or(0),
+                    retry_after
+                );
+
+                Err(format!(
+                    "RATE_LIMIT:429:{}:Limit={},Remaining={},RetryAfter={}",
+                    retry_after,
+                    limit.unwrap_or(1000),
+                    remaining.unwrap_or(0),
+                    retry_after
+                ))
+            }
+            504 => {
+                console_error!("[WasmHttpClient] Gateway timeout (504)");
+                Err("Gateway timeout (504): Server timeout, not a rate limit".to_string())
+            }
+            500..=599 => {
+                console_error!("[WasmHttpClient] Server error ({})", status);
+                Err(format!("HTTP error: {} {}", status, status_text))
+            }
+            _ => {
+                console_error!("[WasmHttpClient] HTTP error: {} {}", status, status_text);
+                Err(format!("HTTP error: {} {}", status, status_text))
+            }
+        }
+    }
+
     /// Get a streaming response from a URL
     pub async fn get_stream(&self, url: &str) -> Result<BrowserStream, String> {
         console_info!("[WasmHttpClient] Creating fetch request for: {}", url);
@@ -120,12 +209,7 @@ impl WasmHttpClient {
         console_debug!("[WasmHttpClient] Using browser's automatic chunked encoding for upload");
 
         // Add authorization header if provided
-        if let Some(token) = auth_token {
-            headers
-                .set("Authorization", &format!("Bearer {}", token))
-                .map_err(|e| format!("Failed to set Authorization header: {:?}", e))?;
-            console_debug!("[WasmHttpClient] Authorization header added");
-        }
+        Self::add_auth_header(&headers, auth_token)?;
         opts.set_headers(&headers);
 
         let request = Request::new_with_str_and_init(url, &opts)
@@ -142,84 +226,13 @@ impl WasmHttpClient {
             .dyn_into()
             .map_err(|_| "Failed to cast to Response")?;
 
-        let status = response.status();
-        let status_text = response.status_text();
-        console_debug!("[WasmHttpClient] Response: {} {}", status, status_text);
+        console_debug!(
+            "[WasmHttpClient] Response: {} {}",
+            response.status(),
+            response.status_text()
+        );
 
-        if !response.ok() {
-            match status {
-                429 => {
-                    // Parse rate limit headers
-                    let response_headers = response.headers();
-
-                    let limit = response_headers
-                        .get("RateLimit-Limit")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.parse::<i32>().ok());
-
-                    let reset = response_headers
-                        .get("RateLimit-Reset")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.parse::<u64>().ok());
-
-                    let remaining = response_headers
-                        .get("RateLimit-Remaining")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.parse::<i32>().ok());
-
-                    // Calculate retry delay based on reset time
-                    let retry_after = if let Some(reset_time) = reset {
-                        let now = (js_sys::Date::now() / 1000.0) as u64;
-                        if reset_time > now {
-                            reset_time - now
-                        } else {
-                            60 // Default to 1 minute if reset is in past
-                        }
-                    } else {
-                        60 // Default fallback
-                    };
-
-                    console_error!(
-                        "[WasmHttpClient] Rate limited (429): limit={:?}, remaining={:?}, retry_after={}s",
-                        limit.unwrap_or(0),
-                        remaining.unwrap_or(0),
-                        retry_after
-                    );
-
-                    return Err(format!(
-                        "RATE_LIMIT:429:{}:Limit={},Remaining={},RetryAfter={}",
-                        retry_after,
-                        limit.unwrap_or(1000),
-                        remaining.unwrap_or(0),
-                        retry_after
-                    ));
-                }
-                401 => {
-                    console_error!("[WasmHttpClient] Authentication failed (401)");
-                    return Err(format!(
-                        "Authentication failed (401 Unauthorized): {}",
-                        status_text
-                    ));
-                }
-                504 => {
-                    console_error!("[WasmHttpClient] Gateway timeout (504)");
-                    return Err(
-                        "Gateway timeout (504): Server timeout, not a rate limit".to_string()
-                    );
-                }
-                500 => {
-                    console_error!("[WasmHttpClient] Server error (500)");
-                    return Err(format!("HTTP error: {} {}", status, status_text));
-                }
-                _ => {
-                    console_error!("[WasmHttpClient] HTTP error: {} {}", status, status_text);
-                    return Err(format!("HTTP error: {} {}", status, status_text));
-                }
-            }
-        }
+        Self::handle_error_response(&response)?;
 
         console_debug!("[WasmHttpClient] POST request completed successfully");
         Ok(response)
@@ -250,11 +263,7 @@ impl WasmHttpClient {
             .map_err(|e| format!("Failed to set Accept header: {:?}", e))?;
 
         // Add authorization header if provided
-        if let Some(token) = auth_token {
-            headers
-                .set("Authorization", &format!("Bearer {}", token))
-                .map_err(|e| format!("Failed to set Authorization header: {:?}", e))?;
-        }
+        Self::add_auth_header(&headers, auth_token)?;
         opts.set_headers(&headers);
 
         let request = Request::new_with_str_and_init(url, &opts)
@@ -269,14 +278,7 @@ impl WasmHttpClient {
             .dyn_into()
             .map_err(|_| "Failed to cast to Response")?;
 
-        if !response.ok() {
-            let status = response.status();
-            let status_text = response.status_text();
-            if status == 401 {
-                return Err(format!("Authentication failed (401 Unauthorized): {}. Check if access token is valid and has required permissions.", status_text));
-            }
-            return Err(format!("HTTP error: {} {}", status, status_text));
-        }
+        Self::handle_error_response(&response)?;
 
         let json_promise = response
             .json()
