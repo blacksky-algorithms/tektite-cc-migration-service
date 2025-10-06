@@ -488,20 +488,16 @@ impl DataTarget for BlobTarget {
     }
 
     async fn list_missing(&self) -> Result<Vec<String>, Box<dyn Error>> {
-        // Get fresh token with automatic refresh
-        let access_token = self
-            .session_provider
-            .get_fresh_token()
-            .await
-            .map_err(|e| format!("Failed to get fresh token: {}", e))?;
+        let mut all_missing_cids = Vec::new();
+        let mut cursor: Option<String> = None;
+        const BATCH_SIZE: i64 = 100; // Match BlobSource batch size
 
         // Get PDS URL from session
         let session = self.session_provider.get_session().await;
-        let url = format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
+        let base_url = format!("{}/xrpc/com.atproto.repo.listMissingBlobs", session.pds);
 
         console_info!(
-            "[BlobTarget] Listing missing blobs from: {} with fresh authentication",
-            url
+            "[BlobTarget] Starting paginated missing blob listing with fresh authentication"
         );
 
         #[derive(serde::Deserialize)]
@@ -515,24 +511,58 @@ impl DataTarget for BlobTarget {
         #[derive(serde::Deserialize)]
         struct ListMissingBlobsOutput {
             blobs: Vec<RecordBlob>,
-            #[allow(dead_code)]
             cursor: Option<String>,
         }
 
-        let response: ListMissingBlobsOutput = self
-            .client
-            .get_json_with_auth(&url, Some(&access_token))
-            .await
-            .map_err(|e| format!("Failed to list missing blobs: {}", e))?;
+        loop {
+            // Get fresh token for each request to handle long-running pagination
+            let access_token = self
+                .session_provider
+                .get_fresh_token()
+                .await
+                .map_err(|e| format!("Failed to get fresh token: {}", e))?;
 
-        let missing_cids = response
-            .blobs
-            .into_iter()
-            .map(|b| b.cid)
-            .collect::<Vec<_>>();
-        console_info!("[BlobTarget] Found {} missing blobs", missing_cids.len());
+            // Build URL with pagination parameters
+            let mut url = format!("{}?limit={}", base_url, BATCH_SIZE);
+            if let Some(ref c) = cursor {
+                url.push_str(&format!("&cursor={}", c));
+            }
 
-        Ok(missing_cids)
+            console_debug!("[BlobTarget] Fetching missing blob batch from: {}", url);
+
+            let response: ListMissingBlobsOutput = self
+                .client
+                .get_json_with_auth(&url, Some(&access_token))
+                .await
+                .map_err(|e| format!("Failed to list missing blobs: {}", e))?;
+
+            let batch_count = response.blobs.len();
+            let batch_cids: Vec<String> = response.blobs.into_iter().map(|b| b.cid).collect();
+            all_missing_cids.extend(batch_cids);
+
+            console_info!(
+                "[BlobTarget] Fetched {} missing blobs in this batch, {} total so far",
+                batch_count,
+                all_missing_cids.len()
+            );
+
+            cursor = response.cursor;
+
+            // If no cursor or empty cursor, we're done
+            if cursor.is_none() || cursor.as_ref().is_some_and(|c| c.is_empty()) {
+                break;
+            }
+
+            // Small delay between requests to avoid overwhelming the server
+            gloo_timers::future::TimeoutFuture::new(100).await;
+        }
+
+        console_info!(
+            "[BlobTarget] Completed missing blob listing: {} total missing blobs",
+            all_missing_cids.len()
+        );
+
+        Ok(all_missing_cids)
     }
 }
 

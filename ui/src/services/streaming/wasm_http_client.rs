@@ -244,10 +244,7 @@ impl WasmHttpClient {
         let opts = RequestInit::new();
         opts.set_method("GET");
 
-        // Note: Removed compression headers to avoid potential issues in WASM
         let headers = Headers::new().map_err(|e| format!("Failed to create headers: {:?}", e))?;
-        // headers.set("Accept-Encoding", "gzip, deflate, br")
-        //     .map_err(|e| format!("Failed to set Accept-Encoding header: {:?}", e))?;
         headers
             .set("Accept", "application/json")
             .map_err(|e| format!("Failed to set Accept header: {:?}", e))?;
