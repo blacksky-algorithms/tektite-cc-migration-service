@@ -4,7 +4,7 @@ use ui::MigrationService;
 const FAVICON: Asset = asset!("/assets/favicon.png");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 // Banner image is referenced in index.html meta tags and bundled automatically
-// const _BANNER: Asset = asset!("/assets/banner-1456-1000.png");
+const _BANNER: Asset = asset!("/assets/banner-1456-1000.png");
 
 fn main() {
     dioxus::launch(App);
