@@ -360,6 +360,16 @@ pub fn PlcVerificationForm(props: PlcVerificationFormProps) -> Element {
                                 li { "If you see an invalid handle error, make a post/skeet with your new handle @{handle}" }
                                 li { "Re-enable 2FA (recommended)" }
                                 li { "Note: Invalid handle warnings may appear for ~20 minutes (this is normal)" }
+                                li {
+                                    "If you have migration questions, reach out to "
+                                    a {
+                                        href: "https://blacksky.community/profile/tektite.cc",
+                                        target: "_blank",
+                                        class: "help-link",
+                                        "@tektite.cc"
+                                    }
+                                    " on BlackSky"
+                                }
                             }
 
                             // Add PDS policy links if available

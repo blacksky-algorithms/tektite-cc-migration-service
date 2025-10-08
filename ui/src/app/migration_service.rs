@@ -13,6 +13,7 @@ use crate::components::forms::ClientLoginFormComponent;
 use crate::migration::storage::LocalStorageManager;
 
 const MIGRATION_SERVICE_CSS: Asset = asset!("/assets/styling/migration_service.css");
+const BLACK_LOGO: Asset = asset!("/assets/img/Logos/Black/SVG/Black_FullLogo.svg");
 
 /// Render the appropriate login form based on feature flags
 fn render_login_form(
@@ -65,9 +66,17 @@ pub fn MigrationService() -> Element {
         div {
             class: "migration-service-container",
 
-            h1 {
-                class: "migration-title",
-                "PDS Migration Service"
+            div {
+                class: "title-container",
+                img {
+                    class: "title-logo",
+                    src: BLACK_LOGO,
+                    alt: "BlackSky Logo"
+                }
+                h1 {
+                    class: "migration-title",
+                    "PDS Migration Service"
+                }
             }
 
             // Video Tutorial Accordion
@@ -87,6 +96,15 @@ pub fn MigrationService() -> Element {
                     li { "🔐 If you have 2FA enable, please disable it before migration" }
                     li { "📶 If using a mobile device, ensure you have a stable Wi-Fi connection" }
                     li { "⚠️ Use this tool at your own risk - we are not liable for any data loss" }
+                    li {
+                        "📚 For detailed instructions and troubleshooting, see our "
+                        a {
+                            href: "https://docs.blacksky.community/migrating-to-blacksky-pds-complete-guide",
+                            target: "_blank",
+                            class: "banner-link",
+                            "Complete Migration Guide"
+                        }
+                    }
                 }
             }
 

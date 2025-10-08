@@ -266,17 +266,6 @@ pub async fn check_account_status_impl(
     }
 }
 
-/// Debug flag to enable short token expiry for testing session refresh
-///
-/// When enabled (in debug builds only), tokens will expire in 2 minutes instead of ~60 minutes.
-/// This allows testing token refresh during migrations without waiting an hour.
-///
-/// To enable: Set to `true` and rebuild in debug mode
-///
-/// **IMPORTANT**: Only affects debug builds. Release builds always use normal expiry.
-#[cfg(debug_assertions)]
-const TEST_SHORT_TOKEN_EXPIRY: bool = false; // Set to true to enable 2-minute token expiry
-
 /// Implementation of refresh_session functionality
 /// Refresh session tokens
 #[instrument(skip(client), err)]
@@ -310,21 +299,6 @@ pub async fn refresh_session_impl(
             .unwrap_or_default()
             .to_string();
         let expires_at = if !new_access_jwt.is_empty() {
-            // In debug mode with TEST_SHORT_TOKEN_EXPIRY enabled, override expiry to 2 minutes
-            #[cfg(debug_assertions)]
-            if TEST_SHORT_TOKEN_EXPIRY {
-                use crate::services::client::types::current_time_secs;
-                let short_expiry = current_time_secs() + 120; // 2 minutes from now
-                info!(
-                    "[DEBUG] Token expiry overridden to 2 minutes for testing (expires at: {})",
-                    short_expiry
-                );
-                Some(short_expiry)
-            } else {
-                JwtUtils::get_expiration(&new_access_jwt)
-            }
-
-            #[cfg(not(debug_assertions))]
             JwtUtils::get_expiration(&new_access_jwt)
         } else {
             None

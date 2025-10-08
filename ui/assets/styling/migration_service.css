@@ -52,14 +52,25 @@
     text-align: center;
 }
 
-.migration-title {
-    text-align: center;
-    /* color: #1f2937; */
-    color: #8b8bff;
+.title-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
     margin-bottom: 30px;
+}
+
+.title-logo {
+    height: 2rem;
+    width: auto;
+}
+
+.migration-title {
+    /* color: #1f2937; */
+    color: #000000;
+    margin: 0;
     font-size: 2rem;
     font-weight: 600;
-    
 }
 
 /* Recommendations Banner Styling */
@@ -99,6 +110,17 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.banner-link {
+    color: #000000;
+    text-decoration: underline;
+    font-weight: 600;
+    transition: color 0.15s ease;
+}
+
+.banner-link:hover {
+    color: #8B8BFF;
 }
 
 .migration-form {
@@ -434,6 +456,17 @@
     font-style: italic;
 }
 
+.help-link {
+    color: #8B8BFF;
+    text-decoration: underline;
+    font-weight: 600;
+    transition: color 0.15s ease;
+}
+
+.help-link:hover {
+    color: #000000;
+}
+
 /* Handle input container with fixed domain suffix */
 .handle-input-container {
     display: flex;
@@ -743,6 +776,14 @@
         padding: 16px;
     }
     
+    .title-container {
+        gap: 12px;
+    }
+
+    .title-logo {
+        height: 1.5rem;
+    }
+
     .migration-title {
         font-size: 1.5rem;
     }

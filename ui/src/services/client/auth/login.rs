@@ -2,11 +2,6 @@ use anyhow::Result;
 use serde_json::json;
 use tracing::{error, info, instrument};
 
-/// Debug flag to enable short token expiry for testing session refresh
-/// This is duplicated from account.rs to avoid module visibility issues
-#[cfg(debug_assertions)]
-const TEST_SHORT_TOKEN_EXPIRY: bool = false; // Set to true to enable 2-minute token expiry
-
 use crate::services::client::session::JwtUtils;
 use crate::services::client::types::*;
 use crate::services::client::{ClientError, PdsClient};
@@ -102,22 +97,7 @@ pub async fn create_session_core(
         }
 
         // Parse JWT for expiration
-        let expires_at = {
-            #[cfg(debug_assertions)]
-            if TEST_SHORT_TOKEN_EXPIRY {
-                let short_expiry = current_time_secs() + 120; // 2 minutes from now
-                info!(
-                    "[DEBUG] Login token expiry overridden to 2 minutes for testing (expires at: {})",
-                    short_expiry
-                );
-                Some(short_expiry)
-            } else {
-                JwtUtils::get_expiration(&access_jwt)
-            }
-
-            #[cfg(not(debug_assertions))]
-            JwtUtils::get_expiration(&access_jwt)
-        };
+        let expires_at = JwtUtils::get_expiration(&access_jwt);
 
         let session = ClientSessionCredentials {
             did: session_data["did"].as_str().unwrap_or_default().to_string(),

@@ -1,0 +1,10 @@
+[application]
+name = "tektite-migration-service"
+default_platform = "web"
+
+[web.app]
+title = "BlackSky Algorithms - Tektite Migration Service"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets"]
