@@ -56,7 +56,60 @@ pub async fn resolve_handle_dns_doh(
     Ok(dids.into_iter().next().unwrap())
 }
 
-/// Resolve handle to DID using HTTP well-known endpoint
+/// Resolve handle to DID using Slingshot service
+#[instrument(skip(http_client))]
+pub async fn resolve_handle_slingshot(
+    http_client: &Client,
+    handle: &str,
+) -> Result<String, ResolveError> {
+    let slingshot_url = format!(
+        "https://slingshot.microcosm.blue/xrpc/com.atproto.identity.resolveHandle?handle={}",
+        handle
+    );
+
+    info!("Fetching DID from Slingshot: {}", slingshot_url);
+
+    let response = http_client
+        .get(&slingshot_url)
+        .header("Accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| ResolveError::HttpRequestFailed {
+            error: format!("Failed to fetch from Slingshot: {}", e),
+        })?;
+
+    if !response.status().is_success() {
+        return Err(ResolveError::HttpRequestFailed {
+            error: format!("HTTP {} for {}", response.status(), slingshot_url),
+        });
+    }
+
+    // Parse JSON response: {"did": "did:plc:..."}
+    let json_response: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ResolveError::JsonParseError {
+            error: format!("Failed to parse Slingshot response: {}", e),
+        })?;
+
+    let did = json_response
+        .get("did")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ResolveError::JsonParseError {
+            error: "Slingshot response missing 'did' field".to_string(),
+        })?;
+
+    if did.starts_with("did:") {
+        Ok(did.to_string())
+    } else {
+        Err(ResolveError::InvalidDidFormat {
+            value: did.to_string(),
+            source: slingshot_url,
+        })
+    }
+}
+
 /// Resolve handle to DID using HTTP well-known endpoint
 #[instrument(skip(http_client))]
 pub async fn resolve_handle_http(
@@ -125,7 +178,7 @@ pub async fn resolve_handle_http(
     }
 }
 
-/// Parallel DNS + HTTP resolution with validation (mirrors server-side logic)
+/// Parallel DNS + Slingshot resolution with validation
 #[instrument(skip(doh_resolver, http_client))]
 pub async fn resolve_handle_client_side(
     handle: &str,
@@ -141,9 +194,10 @@ pub async fn resolve_handle_client_side(
 
     info!("Starting parallel handle resolution for {}", handle);
 
-    let (dns_result, http_result) = futures::join!(
+    let (dns_result, slingshot_result) = futures::join!(
         resolve_handle_dns_doh(doh_resolver, handle),
-        resolve_handle_http(http_client, handle)
+        // resolve_handle_http(http_client, handle),
+        resolve_handle_slingshot(http_client, handle)
     );
 
     // Collect successful results
@@ -157,33 +211,41 @@ pub async fn resolve_handle_client_side(
         Err(e) => warn!("DNS resolution failed for {}: {}", handle, e),
     }
 
-    match &http_result {
+    // match &http_result {
+    //     Ok(did) => {
+    //         info!("HTTP resolution succeeded for {}: {}", handle, did);
+    //         results.push(did.clone());
+    //     }
+    //     Err(e) => {
+    //         // Check if this is a CORS error (common and expected for many domains)
+    //         let error_msg = format!("{}", e);
+    //         if error_msg.contains("CORS")
+    //             || error_msg.contains("Cross-Origin")
+    //             || error_msg.contains("error sending request")
+    //             || error_msg.contains("Failed to fetch")
+    //         {
+    //             // CORS errors are expected for domains that don't configure CORS for .well-known
+    //             debug!(
+    //                 "HTTP resolution failed for {} due to CORS/network restriction (expected): {}",
+    //                 handle, e
+    //             );
+    //         } else {
+    //             warn!("HTTP resolution failed for {}: {}", handle, e);
+    //         }
+    //     }
+    // }
+
+    match &slingshot_result {
         Ok(did) => {
-            info!("HTTP resolution succeeded for {}: {}", handle, did);
+            info!("Slingshot resolution succeeded for {}: {}", handle, did);
             results.push(did.clone());
         }
-        Err(e) => {
-            // Check if this is a CORS error (common and expected for many domains)
-            let error_msg = format!("{}", e);
-            if error_msg.contains("CORS")
-                || error_msg.contains("Cross-Origin")
-                || error_msg.contains("error sending request")
-                || error_msg.contains("Failed to fetch")
-            {
-                // CORS errors are expected for domains that don't configure CORS for .well-known
-                debug!(
-                    "HTTP resolution failed for {} due to CORS/network restriction (expected): {}",
-                    handle, e
-                );
-            } else {
-                warn!("HTTP resolution failed for {}: {}", handle, e);
-            }
-        }
+        Err(e) => debug!("Slingshot resolution failed for {}: {}", handle, e),
     }
 
     if results.is_empty() {
         return Err(ResolveError::NoDIDsFound {
-            domain: format!("both DNS and HTTP failed for {}", handle),
+            domain: format!("both DNS and Slingshot resolution failed for {}", handle),
         });
     }
 
@@ -208,8 +270,8 @@ pub async fn resolve_handle_client_side(
         // Log conflict but still return the first successful result
         // This is more user-friendly than failing completely
         warn!(
-            "Resolution methods disagree for {} - DNS: {:?}, HTTP: {:?}",
-            handle, dns_result, http_result
+            "Resolution methods disagree for {} - DNS: {:?}, Slingshot: {:?}",
+            handle, dns_result, slingshot_result
         );
         info!(
             "Using first successful result for {}: {}",

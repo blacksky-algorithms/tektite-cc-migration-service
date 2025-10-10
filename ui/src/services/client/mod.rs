@@ -170,17 +170,32 @@ pub mod compat {
     //! to ease migration from server-side to client-side operations
 
     use super::*;
+    use std::sync::{Arc, OnceLock};
+
+    // Singleton instances to avoid repeated allocations in WASM32 linear memory
+    static IDENTITY_RESOLVER: OnceLock<Arc<WebIdentityResolver>> = OnceLock::new();
+    static PDS_CLIENT: OnceLock<Arc<PdsClient>> = OnceLock::new();
+
+    /// Get or initialize the shared identity resolver
+    fn get_identity_resolver() -> Arc<WebIdentityResolver> {
+        Arc::clone(IDENTITY_RESOLVER.get_or_init(|| Arc::new(WebIdentityResolver::new())))
+    }
+
+    /// Get or initialize the shared PDS client
+    fn get_pds_client() -> Arc<PdsClient> {
+        Arc::clone(PDS_CLIENT.get_or_init(|| Arc::new(PdsClient::new())))
+    }
 
     /// Resolve handle using client-side DNS-over-HTTPS (replaces api::resolve_handle_shared)
     pub async fn resolve_handle_shared(handle: String) -> ClientResult<ClientPdsProvider> {
-        let client = WebIdentityResolver::new();
+        let client = get_identity_resolver();
         let provider = client.determine_provider(&handle).await;
         Ok(provider)
     }
 
     /// Login to PDS using client-side operations (replaces api::pds_login)
     pub async fn pds_login(form: ClientLoginRequest) -> ClientResult<ClientLoginResponse> {
-        let client = PdsClient::new();
+        let client = get_pds_client();
         client.login(&form.identifier, &form.password).await
     }
 
@@ -188,7 +203,7 @@ pub mod compat {
     pub async fn create_account(
         form: ClientCreateAccountRequest,
     ) -> ClientResult<ClientCreateAccountResponse> {
-        let client = PdsClient::new();
+        let client = get_pds_client();
         client.create_account(form).await
     }
 
@@ -196,13 +211,13 @@ pub mod compat {
     pub async fn check_account_status(
         session: ClientSessionCredentials,
     ) -> ClientResult<ClientAccountStatusResponse> {
-        let client = PdsClient::new();
+        let client = get_pds_client();
         client.check_account_status(&session).await
     }
 
     /// Describe server using client-side operations (replaces api::describe_server)
     pub async fn describe_server(pds_url: String) -> ClientResult<serde_json::Value> {
-        let client = PdsClient::new();
+        let client = get_pds_client();
         client.describe_server(&pds_url).await
     }
 }

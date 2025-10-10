@@ -45,7 +45,7 @@ impl DnsOverHttpsResolver {
             primary_endpoint: "https://mozilla.cloudflare-dns.com/dns-query".to_string(),
             fallback_endpoints: vec![
                 "https://cloudflare-dns.com/dns-query".to_string(),
-                "https://dns.google/resolve".to_string(),
+                // "https://dns.google/resolve".to_string(),
                 "https://dns.quad9.net:5053/dns-query".to_string(),
             ],
             cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap()))),
