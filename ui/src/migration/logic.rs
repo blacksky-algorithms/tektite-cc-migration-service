@@ -242,49 +242,68 @@ pub async fn execute_migration_client_side(
                             ));
 
                             // Migration accounts are deactivated until DID is updated, so use
-                            // login_with_explicit_pds which sets allowTakendown=true
-                            match migration_client
-                                .pds_client
-                                .login_with_explicit_pds(&old_session.did, &state.form3.password, &new_pds_url)
-                                .await
-                            {
-                                Ok(login_response) if login_response.success && login_response.session.is_some() => {
-                                    console_info!("[Migration] Explicit PDS login successful - proceeding with real session");
-                                    dispatch.call(MigrationAction::SetMigrationStep(
-                                        "Successfully logged into existing account. Continuing migration...".to_string(),
-                                    ));
+                            // login_with_explicit_pds which sets allowTakendown=true.
+                            // Try new password first, then fall back to old PDS password
+                            // (the account may have been created in a previous failed attempt
+                            // with a different password).
+                            let passwords_to_try: Vec<(&str, &str)> = {
+                                let mut passwords = vec![("new", state.form3.password.as_str())];
+                                if state.form1.password != state.form3.password {
+                                    passwords.push(("original PDS", state.form1.password.as_str()));
+                                }
+                                passwords
+                            };
 
-                                    let session = login_response.session.unwrap();
-                                    if let Err(e) = LocalStorageManager::store_client_session_as_new(&session) {
-                                        console_warn!("Failed to store session: {}", e);
+                            let mut login_succeeded = false;
+                            let mut last_error_msg = String::new();
+                            let mut recovered_session = None;
+
+                            for (password_label, password) in &passwords_to_try {
+                                console_info!("[Migration] Trying {} password for existing account login", password_label);
+                                match migration_client
+                                    .pds_client
+                                    .login_with_explicit_pds(&old_session.did, password, &new_pds_url)
+                                    .await
+                                {
+                                    Ok(login_response) if login_response.success && login_response.session.is_some() => {
+                                        console_info!("[Migration] Login with {} password successful", password_label);
+                                        dispatch.call(MigrationAction::SetMigrationStep(
+                                            "Successfully logged into existing account. Continuing migration...".to_string(),
+                                        ));
+                                        let session = login_response.session.unwrap();
+                                        if let Err(e) = LocalStorageManager::store_client_session_as_new(&session) {
+                                            console_warn!("Failed to store session: {}", e);
+                                        }
+                                        dispatch.call(MigrationAction::SetNewPdsSession(Some((&session).into())));
+                                        recovered_session = Some(session);
+                                        login_succeeded = true;
+                                        break;
                                     }
-                                    dispatch.call(MigrationAction::SetNewPdsSession(Some((&session).into())));
-                                    session
+                                    Ok(login_response) => {
+                                        console_warn!("[Migration] Login with {} password failed: {}", password_label, login_response.message);
+                                        last_error_msg = login_response.message;
+                                    }
+                                    Err(e) => {
+                                        console_warn!("[Migration] Login with {} password error: {}", password_label, e);
+                                        last_error_msg = e.to_string();
+                                    }
                                 }
-                                Ok(login_response) if !login_response.success => {
-                                    console_error!("[Migration] Explicit PDS login failed: {}", login_response.message);
-                                    dispatch.call(MigrationAction::SetMigrationError(Some(
-                                        format!("Account exists but login failed: {}. Please verify your credentials.", login_response.message)
-                                    )));
-                                    dispatch.call(MigrationAction::SetMigrating(false));
-                                    return;
-                                }
-                                Ok(_) => {
-                                    console_error!("[Migration] Unexpected explicit login response");
-                                    dispatch.call(MigrationAction::SetMigrationError(Some(
-                                        "Unexpected response from explicit PDS login".to_string()
-                                    )));
-                                    dispatch.call(MigrationAction::SetMigrating(false));
-                                    return;
-                                }
-                                Err(e) => {
-                                    console_error!("[Migration] Failed to login to existing account: {}", e);
-                                    dispatch.call(MigrationAction::SetMigrationError(Some(
-                                        format!("Failed to login to existing account: {}", e)
-                                    )));
-                                    dispatch.call(MigrationAction::SetMigrating(false));
-                                    return;
-                                }
+                            }
+
+                            if login_succeeded {
+                                recovered_session.unwrap()
+                            } else {
+                                console_error!("[Migration] All login attempts failed for existing account");
+                                dispatch.call(MigrationAction::SetMigrationError(Some(
+                                    format!(
+                                        "Account already exists on target PDS from a previous migration attempt, \
+                                        but login failed ({}). The PDS admin may need to delete the stale account \
+                                        so you can try again.",
+                                        last_error_msg
+                                    )
+                                )));
+                                dispatch.call(MigrationAction::SetMigrating(false));
+                                return;
                             }
                         } else {
                             // Other errors - fail as before
