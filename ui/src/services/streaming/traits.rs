@@ -12,8 +12,6 @@ use tokio::sync::mpsc;
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Reflect, Uint8Array};
 use std::task::{Context, Poll};
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::time::{timeout, Duration};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::Response;

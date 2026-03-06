@@ -570,6 +570,7 @@ fn is_mobile_browser() -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 fn is_mobile_browser() -> bool {
     false
 }

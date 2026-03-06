@@ -5,9 +5,18 @@ use serde::{Deserialize, Serialize};
 use js_sys;
 
 /// Get current time in seconds since UNIX epoch (WASM compatible)
-#[cfg(target_arch = "wasm32")]
 pub fn current_time_secs() -> u64 {
-    (js_sys::Date::now() / 1000.0) as u64
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0) as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
 }
 
 /// DNS-over-HTTPS response structure matching Cloudflare's API

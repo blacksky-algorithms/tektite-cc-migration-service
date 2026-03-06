@@ -107,7 +107,6 @@ pub struct RateLimitInfo {
 
 impl RateLimitInfo {
     /// Create from reqwest response headers
-    #[cfg(target_arch = "wasm32")]
     pub fn from_response(response: &reqwest::Response) -> Option<Self> {
         let headers = response.headers();
 
@@ -140,8 +139,7 @@ impl RateLimitInfo {
     /// Calculate seconds until rate limit resets
     pub fn retry_after_seconds(&self) -> Option<u64> {
         if let Some(reset) = self.reset {
-            use js_sys::Date;
-            let now = (Date::now() / 1000.0) as u64;
+            let now = super::types::current_time_secs();
             if reset > now {
                 Some(reset - now)
             } else {

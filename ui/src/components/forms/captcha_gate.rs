@@ -7,9 +7,22 @@
 //! and listens for the redirect with the verification code.
 
 use dioxus::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
-use crate::{console_error, console_info, console_warn};
+use crate::{console_error, console_info};
+
+/// Result from the captcha polling closure, communicated via shared state
+#[derive(Clone, Debug)]
+enum CaptchaResult {
+    /// Waiting for user to complete captcha
+    Pending,
+    /// Captcha completed successfully with verification code
+    Success(String),
+    /// Captcha failed with error message
+    Error(String),
+}
 
 #[derive(Props, PartialEq, Clone)]
 pub struct CaptchaGateProps {
@@ -33,7 +46,13 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
     // Generate a random state parameter for CSRF protection
     let captcha_state = use_signal(|| generate_random_state());
     let mut is_loading = use_signal(|| true);
-    let mut completed = use_signal(|| false);
+
+    // Shared result channel between JS closure and Dioxus component
+    // This avoids capturing Dioxus signals/event handlers in JS closures
+    let result_cell: Signal<Rc<RefCell<CaptchaResult>>> =
+        use_signal(|| Rc::new(RefCell::new(CaptchaResult::Pending)));
+    // Track the interval ID for cleanup
+    let interval_id: Signal<Rc<RefCell<i32>>> = use_signal(|| Rc::new(RefCell::new(0)));
 
     let state_value = captcha_state();
 
@@ -49,114 +68,126 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
 
     console_info!("[Captcha] Loading gate URL: {}", gate_url);
 
-    // Listen for postMessage events from the iframe (cross-origin communication)
-    // Also poll for same-origin URL changes as fallback
-    let state_for_listener = state_value.clone();
-    use_effect(move || {
-        let state_param = state_for_listener.clone();
-        let completed_val = completed();
-
-        if completed_val {
-            return;
-        }
-
-        // Set up a message event listener for cross-origin iframe communication
-        let closure = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
-            // Try to parse the message data as a URL with code/state params
-            if let Some(data) = event.data().as_string() {
-                if let Ok(url) = web_sys::Url::new(&data) {
-                    let search_params = url.search_params();
-                    let url_state = search_params.get("state");
-                    let code = search_params.get("code");
-
-                    if let (Some(url_state), Some(_code)) = (url_state, code) {
-                        if url_state == state_param {
-                            console_info!("[Captcha] Received verification code via postMessage");
-                            // We'll handle this via the poll approach instead
-                            // since EventHandler can't be called from a JS closure directly
-                        } else {
-                            console_warn!("[Captcha] State mismatch in postMessage");
-                        }
-                    }
-                }
-            }
-        }) as Box<dyn FnMut(web_sys::MessageEvent)>);
-
-        let window = web_sys::window().unwrap();
-        let _ =
-            window.add_event_listener_with_callback("message", closure.as_ref().unchecked_ref());
-        closure.forget(); // Leak closure since we need it to live for the component lifetime
-    });
-
-    // Poll the iframe for URL changes (same approach as PDS MOOver)
+    // Set up the polling interval once
     let state_for_poll = state_value.clone();
     use_effect(move || {
         let state_param = state_for_poll.clone();
+        let result_rc = result_cell();
+        let interval_rc = interval_id();
 
-        // Set up polling interval to check iframe URL
+        // Polling closure only writes to the shared Rc<RefCell<>>, never touches Dioxus signals
+        let result_writer = result_rc.clone();
+        let interval_ref = interval_rc.clone();
         let interval_closure = Closure::wrap(Box::new(move || {
-            if completed() {
-                return;
+            // Check if already completed
+            {
+                let current = result_writer.borrow();
+                if !matches!(*current, CaptchaResult::Pending) {
+                    return;
+                }
             }
 
-            let window = web_sys::window().unwrap();
-            let document = window.document().unwrap();
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => return,
+            };
+            let document = match window.document() {
+                Some(d) => d,
+                None => return,
+            };
 
-            if let Some(iframe_el) = document.get_element_by_id("captcha-gate-iframe") {
-                if let Ok(iframe) = iframe_el.dyn_into::<web_sys::HtmlIFrameElement>() {
-                    if let Some(content_window) = iframe.content_window() {
-                        // Try to read the iframe location (will fail for cross-origin)
-                        if let Ok(location) = content_window.location().href() {
-                            if let Ok(url) = web_sys::Url::new(&location) {
-                                let search_params = url.search_params();
-                                let url_state = search_params.get("state");
-                                let code = search_params.get("code");
+            let iframe_el = match document.get_element_by_id("captcha-gate-iframe") {
+                Some(el) => el,
+                None => return,
+            };
+            let iframe = match iframe_el.dyn_into::<web_sys::HtmlIFrameElement>() {
+                Ok(f) => f,
+                Err(_) => return,
+            };
+            let content_window = match iframe.content_window() {
+                Some(w) => w,
+                None => return,
+            };
 
-                                if let Some(url_state) = url_state {
-                                    if url_state == state_param {
-                                        if let Some(code) = code {
-                                            console_info!(
-                                                "[Captcha] Verification code received from iframe redirect"
-                                            );
-                                            completed.set(true);
-                                            on_success.call(code);
-                                        } else {
-                                            console_error!("[Captcha] No code in redirect URL");
-                                            on_error.call(
-                                                "No verification code returned from captcha"
-                                                    .to_string(),
-                                            );
-                                        }
-                                    } else if !url_state.is_empty() {
-                                        console_error!(
-                                            "[Captcha] State mismatch - possible security issue"
-                                        );
-                                        on_error.call(
-                                            "State mismatch - possible security issue".to_string(),
-                                        );
-                                    }
-                                }
+            // Try to read the iframe location (will throw for cross-origin until redirect)
+            let href = match content_window.location().href() {
+                Ok(h) => h,
+                Err(_) => return, // Cross-origin - expected while captcha page is shown
+            };
+
+            let url = match web_sys::Url::new(&href) {
+                Ok(u) => u,
+                Err(_) => return,
+            };
+
+            let search_params = url.search_params();
+            let url_state = search_params.get("state");
+            let code = search_params.get("code");
+
+            if let Some(url_state) = url_state {
+                if url_state == state_param {
+                    if let Some(code) = code {
+                        *result_writer.borrow_mut() = CaptchaResult::Success(code);
+                        // Clear the interval now that we're done
+                        let id = *interval_ref.borrow();
+                        if id != 0 {
+                            if let Some(w) = web_sys::window() {
+                                w.clear_interval_with_handle(id);
                             }
                         }
+                    } else {
+                        *result_writer.borrow_mut() =
+                            CaptchaResult::Error("No verification code returned".to_string());
                     }
+                } else if !url_state.is_empty() {
+                    *result_writer.borrow_mut() =
+                        CaptchaResult::Error("State mismatch - possible security issue".to_string());
                 }
             }
         }) as Box<dyn FnMut()>);
 
         let window = web_sys::window().unwrap();
-        let interval_id = window
+        let id = window
             .set_interval_with_callback_and_timeout_and_arguments_0(
                 interval_closure.as_ref().unchecked_ref(),
-                100, // Poll every 100ms like PDS MOOver
+                100,
             )
             .unwrap_or(0);
 
+        *interval_rc.borrow_mut() = id;
         interval_closure.forget();
+    });
 
-        // Return cleanup (clear interval on unmount)
-        // Note: Dioxus use_effect doesn't support cleanup returns in the same way,
-        // but the completed flag prevents further processing
-        let _ = interval_id;
+    // Watch the shared result and dispatch Dioxus events when it changes
+    // This runs in the Dioxus context where signals and event handlers are safe to use
+    let result_rc_for_watch = result_cell();
+    let interval_rc_for_cleanup = interval_id();
+    use_effect(move || {
+        let result = result_rc_for_watch.borrow().clone();
+        match result {
+            CaptchaResult::Pending => {}
+            CaptchaResult::Success(code) => {
+                console_info!("[Captcha] Verification code received from iframe redirect");
+                // Clear interval
+                let id = *interval_rc_for_cleanup.borrow();
+                if id != 0 {
+                    if let Some(w) = web_sys::window() {
+                        w.clear_interval_with_handle(id);
+                    }
+                }
+                on_success.call(code);
+            }
+            CaptchaResult::Error(err) => {
+                console_error!("[Captcha] Error: {}", err);
+                let id = *interval_rc_for_cleanup.borrow();
+                if id != 0 {
+                    if let Some(w) = web_sys::window() {
+                        w.clear_interval_with_handle(id);
+                    }
+                }
+                on_error.call(err);
+            }
+        }
     });
 
     rsx! {

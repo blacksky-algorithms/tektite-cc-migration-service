@@ -241,20 +241,20 @@ pub async fn execute_migration_client_side(
                                 "Account already exists. Logging in to existing account...".to_string(),
                             ));
 
-                            // Direct login using DID and password (equivalent to JavaScript createNewAccount=false)
+                            // Migration accounts are deactivated until DID is updated, so use
+                            // login_with_explicit_pds which sets allowTakendown=true
                             match migration_client
                                 .pds_client
-                                .try_login_before_creation(&old_session.did, &state.form3.password, &new_pds_url)
+                                .login_with_explicit_pds(&old_session.did, &state.form3.password, &new_pds_url)
                                 .await
                             {
                                 Ok(login_response) if login_response.success && login_response.session.is_some() => {
-                                    console_info!("[Migration] Direct login successful - proceeding with real session");
+                                    console_info!("[Migration] Explicit PDS login successful - proceeding with real session");
                                     dispatch.call(MigrationAction::SetMigrationStep(
                                         "Successfully logged into existing account. Continuing migration...".to_string(),
                                     ));
 
                                     let session = login_response.session.unwrap();
-                                    // Store real session and continue with migration
                                     if let Err(e) = LocalStorageManager::store_client_session_as_new(&session) {
                                         console_warn!("Failed to store session: {}", e);
                                     }
@@ -262,83 +262,22 @@ pub async fn execute_migration_client_side(
                                     session
                                 }
                                 Ok(login_response) if !login_response.success => {
-                                    // Check if this is the expected deactivated account scenario using structured fields first
-                                    let is_deactivated = login_response.status.as_deref() == Some("deactivated")
-                                        || (login_response.active == Some(false) && login_response.status.as_deref() == Some("deactivated"))
-                                        || login_response.message.contains("Account is not active (status: deactivated)");
-
-                                    if is_deactivated {
-                                        console_info!("[Migration] Account deactivated as expected - trying explicit PDS login");
-                                        dispatch.call(MigrationAction::SetMigrationStep(
-                                            "Account exists but is deactivated (normal for migration). Attempting explicit login...".to_string(),
-                                        ));
-
-                                        // Use explicit PDS login for deactivated account (equivalent to goat --pds-host login)
-                                        match migration_client
-                                            .pds_client
-                                            .login_with_explicit_pds(&old_session.did, &state.form3.password, &new_pds_url)
-                                            .await
-                                        {
-                                            Ok(explicit_response) if explicit_response.success && explicit_response.session.is_some() => {
-                                                console_info!("[Migration] Explicit PDS login successful - proceeding with real session");
-                                                dispatch.call(MigrationAction::SetMigrationStep(
-                                                    "Successfully logged into deactivated account. Continuing migration...".to_string(),
-                                                ));
-
-                                                let session = explicit_response.session.unwrap();
-                                                // Store real session and continue with migration
-                                                if let Err(e) = LocalStorageManager::store_client_session_as_new(&session) {
-                                                    console_warn!("Failed to store session: {}", e);
-                                                }
-                                                dispatch.call(MigrationAction::SetNewPdsSession(Some((&session).into())));
-                                                session
-                                            }
-                                            Ok(explicit_response) if !explicit_response.success => {
-                                                console_error!("[Migration] Explicit PDS login also failed: {}", explicit_response.message);
-                                                dispatch.call(MigrationAction::SetMigrationError(Some(
-                                                    format!("Could not login to existing account even with explicit PDS: {}", explicit_response.message)
-                                                )));
-                                                dispatch.call(MigrationAction::SetMigrating(false));
-                                                return;
-                                            }
-                                            Ok(_) => {
-                                                console_error!("[Migration] Unexpected explicit login response");
-                                                dispatch.call(MigrationAction::SetMigrationError(Some(
-                                                    "Unexpected response from explicit PDS login".to_string()
-                                                )));
-                                                dispatch.call(MigrationAction::SetMigrating(false));
-                                                return;
-                                            }
-                                            Err(e) => {
-                                                console_error!("[Migration] Explicit PDS login failed: {}", e);
-                                                dispatch.call(MigrationAction::SetMigrationError(Some(
-                                                    format!("Failed to login to deactivated account: {}", e)
-                                                )));
-                                                dispatch.call(MigrationAction::SetMigrating(false));
-                                                return;
-                                            }
-                                        }
-                                    } else {
-                                        // Other login failures (wrong password, etc.) should still stop migration
-                                        console_warn!("[Migration] Account exists but login failed: {}", login_response.message);
-                                        dispatch.call(MigrationAction::SetMigrationError(Some(
-                                            format!("Account exists but login failed: {}. Please verify your credentials.", login_response.message)
-                                        )));
-                                        dispatch.call(MigrationAction::SetMigrating(false));
-                                        return;
-                                    }
+                                    console_error!("[Migration] Explicit PDS login failed: {}", login_response.message);
+                                    dispatch.call(MigrationAction::SetMigrationError(Some(
+                                        format!("Account exists but login failed: {}. Please verify your credentials.", login_response.message)
+                                    )));
+                                    dispatch.call(MigrationAction::SetMigrating(false));
+                                    return;
                                 }
                                 Ok(_) => {
-                                    // Fallback for any other Ok combination (shouldn't happen)
-                                    console_error!("[Migration] Unexpected login response state during existing account login");
+                                    console_error!("[Migration] Unexpected explicit login response");
                                     dispatch.call(MigrationAction::SetMigrationError(Some(
-                                        "Unexpected response from PDS during existing account login".to_string()
+                                        "Unexpected response from explicit PDS login".to_string()
                                     )));
                                     dispatch.call(MigrationAction::SetMigrating(false));
                                     return;
                                 }
                                 Err(e) => {
-                                    // Network/other errors
                                     console_error!("[Migration] Failed to login to existing account: {}", e);
                                     dispatch.call(MigrationAction::SetMigrationError(Some(
                                         format!("Failed to login to existing account: {}", e)

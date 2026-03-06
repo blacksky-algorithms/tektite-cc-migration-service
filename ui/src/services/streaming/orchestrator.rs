@@ -34,15 +34,12 @@ pub enum ProgressEvent {
     Completed, // Item/phase has completed
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::time::{timeout, Duration};
-
 /// Optimal channel capacity for memory efficiency in WASM environment
 /// Reduced from 64 to 16 to detect backpressure faster and prevent memory buildup
 const CHANNEL_CAPACITY: usize = 16;
 
-/// Stream timeout for detecting stalled streams (used in non-WASM builds)
-#[cfg(not(target_arch = "wasm32"))]
+/// Stream timeout for detecting stalled streams
+#[allow(dead_code)]
 const STREAM_TIMEOUT_SECS: u64 = 30;
 
 /// Maximum retry attempts for failed operations
@@ -291,7 +288,7 @@ impl SyncOrchestrator {
         let stream = source.fetch_stream(item).await?;
 
         // Create the tee for storage and upload (2 outputs)
-        let (tee, mut receivers) = ChannelTee::<CHANNEL_CAPACITY>::new(2);
+        let (tee, mut receivers) = ChannelTee::<{ CHANNEL_CAPACITY }>::new(2);
         let mut storage_rx = receivers.pop().unwrap();
         let mut upload_rx = receivers.pop().unwrap();
 
@@ -340,16 +337,11 @@ impl SyncOrchestrator {
                 result.map(|chunk| (chunk, s))
             });
 
-            // #[cfg(not(target_arch = "wasm32"))]
-            // let stream_iter = futures_util::stream::unfold(stream, |mut s| async {
-            //     match timeout(Duration::from_secs(STREAM_TIMEOUT_SECS), s.next()).await {
-            //         Ok(result) => result.map(|chunk| (chunk, s)),
-            //         Err(_) => Some((
-            //             Err("Stream timeout - no data received for 30 seconds".to_string()),
-            //             s,
-            //         )),
-            //     }
-            // });
+            #[cfg(not(target_arch = "wasm32"))]
+            let stream_iter = futures_util::stream::unfold(stream, |mut s| async {
+                let result = s.next().await;
+                result.map(|chunk| (chunk, s))
+            });
 
             futures_util::pin_mut!(stream_iter);
             console_debug!(
