@@ -3,8 +3,10 @@
 //! When a PDS returns `phoneVerificationRequired: true` in its describeServer response,
 //! account creation requires a verification code obtained from the PDS captcha gate.
 //!
-//! This component embeds the PDS gate/signup page in an iframe (matching PDS MOOver's approach)
-//! and listens for the redirect with the verification code.
+//! This component embeds the PDS gate/signup page in an iframe. After the user completes
+//! the captcha, the PDS redirects back to our origin with `code` and `state` query params.
+//! A small inline script in index.html detects this and sends a postMessage to the parent.
+//! This component listens for that message to extract the verification code.
 
 use dioxus::prelude::*;
 use std::cell::RefCell;
@@ -13,7 +15,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::{console_error, console_info};
 
-/// Result from the captcha polling closure, communicated via shared state
+/// Result from the captcha message listener, communicated via shared state
 #[derive(Clone, Debug)]
 enum CaptchaResult {
     /// Waiting for user to complete captcha
@@ -48,11 +50,8 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
     let mut is_loading = use_signal(|| true);
 
     // Shared result channel between JS closure and Dioxus component
-    // This avoids capturing Dioxus signals/event handlers in JS closures
     let result_cell: Signal<Rc<RefCell<CaptchaResult>>> =
         use_signal(|| Rc::new(RefCell::new(CaptchaResult::Pending)));
-    // Track the interval ID for cleanup
-    let interval_id: Signal<Rc<RefCell<i32>>> = use_signal(|| Rc::new(RefCell::new(0)));
 
     let state_value = captcha_state();
 
@@ -68,17 +67,15 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
 
     console_info!("[Captcha] Loading gate URL: {}", gate_url);
 
-    // Set up the polling interval once
-    let state_for_poll = state_value.clone();
+    // Set up postMessage listener once
+    let state_for_listener = state_value.clone();
     use_effect(move || {
-        let state_param = state_for_poll.clone();
+        let state_param = state_for_listener.clone();
         let result_rc = result_cell();
-        let interval_rc = interval_id();
-
-        // Polling closure only writes to the shared Rc<RefCell<>>, never touches Dioxus signals
         let result_writer = result_rc.clone();
-        let interval_ref = interval_rc.clone();
-        let interval_closure = Closure::wrap(Box::new(move || {
+
+        // Listen for postMessage from the iframe's captcha callback script
+        let listener = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
             // Check if already completed
             {
                 let current = result_writer.borrow();
@@ -87,104 +84,60 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
                 }
             }
 
-            let window = match web_sys::window() {
-                Some(w) => w,
-                None => return,
-            };
-            let document = match window.document() {
-                Some(d) => d,
-                None => return,
-            };
+            // Parse the message data
+            let data = event.data();
+            let msg_type = js_sys::Reflect::get(&data, &JsValue::from_str("type")).ok();
+            let msg_code = js_sys::Reflect::get(&data, &JsValue::from_str("code")).ok();
+            let msg_state = js_sys::Reflect::get(&data, &JsValue::from_str("state")).ok();
 
-            let iframe_el = match document.get_element_by_id("captcha-gate-iframe") {
-                Some(el) => el,
-                None => return,
-            };
-            let iframe = match iframe_el.dyn_into::<web_sys::HtmlIFrameElement>() {
-                Ok(f) => f,
-                Err(_) => return,
-            };
-            let content_window = match iframe.content_window() {
-                Some(w) => w,
-                None => return,
-            };
+            if let (Some(typ), Some(code), Some(state)) = (msg_type, msg_code, msg_state) {
+                let type_str = typ.as_string().unwrap_or_default();
+                if type_str != "captcha-callback" {
+                    return;
+                }
 
-            // Try to read the iframe location (will throw for cross-origin until redirect)
-            let href = match content_window.location().href() {
-                Ok(h) => h,
-                Err(_) => return, // Cross-origin - expected while captcha page is shown
-            };
+                let state_str = state.as_string().unwrap_or_default();
+                let code_str = code.as_string().unwrap_or_default();
 
-            let url = match web_sys::Url::new(&href) {
-                Ok(u) => u,
-                Err(_) => return,
-            };
-
-            let search_params = url.search_params();
-            let url_state = search_params.get("state");
-            let code = search_params.get("code");
-
-            if let Some(url_state) = url_state {
-                if url_state == state_param {
-                    if let Some(code) = code {
-                        *result_writer.borrow_mut() = CaptchaResult::Success(code);
-                        // Clear the interval now that we're done
-                        let id = *interval_ref.borrow();
-                        if id != 0 {
-                            if let Some(w) = web_sys::window() {
-                                w.clear_interval_with_handle(id);
-                            }
-                        }
+                if state_str == state_param {
+                    if !code_str.is_empty() {
+                        console_info!("[Captcha] Received verification code via postMessage");
+                        *result_writer.borrow_mut() = CaptchaResult::Success(code_str);
                     } else {
                         *result_writer.borrow_mut() =
                             CaptchaResult::Error("No verification code returned".to_string());
                     }
-                } else if !url_state.is_empty() {
+                } else if !state_str.is_empty() {
+                    console_error!(
+                        "[Captcha] State mismatch: expected {}, got {}",
+                        state_param,
+                        state_str
+                    );
                     *result_writer.borrow_mut() =
                         CaptchaResult::Error("State mismatch - possible security issue".to_string());
                 }
             }
-        }) as Box<dyn FnMut()>);
+        }) as Box<dyn FnMut(web_sys::MessageEvent)>);
 
         let window = web_sys::window().unwrap();
-        let id = window
-            .set_interval_with_callback_and_timeout_and_arguments_0(
-                interval_closure.as_ref().unchecked_ref(),
-                100,
-            )
-            .unwrap_or(0);
-
-        *interval_rc.borrow_mut() = id;
-        interval_closure.forget();
+        window
+            .add_event_listener_with_callback("message", listener.as_ref().unchecked_ref())
+            .ok();
+        listener.forget();
     });
 
     // Watch the shared result and dispatch Dioxus events when it changes
-    // This runs in the Dioxus context where signals and event handlers are safe to use
     let result_rc_for_watch = result_cell();
-    let interval_rc_for_cleanup = interval_id();
     use_effect(move || {
         let result = result_rc_for_watch.borrow().clone();
         match result {
             CaptchaResult::Pending => {}
             CaptchaResult::Success(code) => {
                 console_info!("[Captcha] Verification code received from iframe redirect");
-                // Clear interval
-                let id = *interval_rc_for_cleanup.borrow();
-                if id != 0 {
-                    if let Some(w) = web_sys::window() {
-                        w.clear_interval_with_handle(id);
-                    }
-                }
                 on_success.call(code);
             }
             CaptchaResult::Error(err) => {
                 console_error!("[Captcha] Error: {}", err);
-                let id = *interval_rc_for_cleanup.borrow();
-                if id != 0 {
-                    if let Some(w) = web_sys::window() {
-                        w.clear_interval_with_handle(id);
-                    }
-                }
                 on_error.call(err);
             }
         }

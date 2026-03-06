@@ -26,6 +26,22 @@
     <meta name="twitter:image" content="https://tektite.cc/assets/banner-1456-1000-3f680aae0709e6e6.png" />
 </head>
 <body>
+    <script>
+    // Captcha callback: if loaded in an iframe with code+state params,
+    // forward them to the parent window via postMessage and stop loading the SPA.
+    (function() {
+        if (window.parent !== window) {
+            var params = new URLSearchParams(window.location.search);
+            var code = params.get('code');
+            var state = params.get('state');
+            if (code && state) {
+                window.parent.postMessage({type: 'captcha-callback', code: code, state: state}, '*');
+                document.write('<p style="text-align:center;margin-top:40px;font-family:sans-serif;color:#666">Verification complete. Returning...</p>');
+                return;
+            }
+        }
+    })();
+    </script>
     <div id="main"></div>
 </body>
 </html>
