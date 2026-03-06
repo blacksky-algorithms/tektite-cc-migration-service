@@ -15,11 +15,9 @@ use wasm_bindgen::prelude::*;
 
 use crate::{console_error, console_info};
 
-/// Result from the captcha message listener, communicated via shared state
+/// Result from the captcha message listener
 #[derive(Clone, Debug)]
 enum CaptchaResult {
-    /// Waiting for user to complete captcha
-    Pending,
     /// Captcha completed successfully with verification code
     Success(String),
     /// Captcha failed with error message
@@ -49,10 +47,6 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
     let captcha_state = use_signal(|| generate_random_state());
     let mut is_loading = use_signal(|| true);
 
-    // Shared result channel between JS closure and Dioxus component
-    let result_cell: Signal<Rc<RefCell<CaptchaResult>>> =
-        use_signal(|| Rc::new(RefCell::new(CaptchaResult::Pending)));
-
     let state_value = captcha_state();
 
     // Build the gate URL following the same pattern as PDS MOOver
@@ -67,24 +61,18 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
 
     console_info!("[Captcha] Loading gate URL: {}", gate_url);
 
-    // Set up postMessage listener once
+    // Set up postMessage listener and bridge to Dioxus via oneshot channel
     let state_for_listener = state_value.clone();
     use_effect(move || {
         let state_param = state_for_listener.clone();
-        let result_rc = result_cell();
-        let result_writer = result_rc.clone();
+
+        // Create a oneshot channel to bridge JS callback -> Dioxus async task
+        let (tx, rx) = tokio::sync::oneshot::channel::<CaptchaResult>();
+        let tx = Rc::new(RefCell::new(Some(tx)));
+        let tx_clone = tx.clone();
 
         // Listen for postMessage from the iframe's captcha callback script
         let listener = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
-            // Check if already completed
-            {
-                let current = result_writer.borrow();
-                if !matches!(*current, CaptchaResult::Pending) {
-                    return;
-                }
-            }
-
-            // Parse the message data
             let data = event.data();
             let msg_type = js_sys::Reflect::get(&data, &JsValue::from_str("type")).ok();
             let msg_code = js_sys::Reflect::get(&data, &JsValue::from_str("code")).ok();
@@ -102,10 +90,13 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
                 if state_str == state_param {
                     if !code_str.is_empty() {
                         console_info!("[Captcha] Received verification code via postMessage");
-                        *result_writer.borrow_mut() = CaptchaResult::Success(code_str);
-                    } else {
-                        *result_writer.borrow_mut() =
-                            CaptchaResult::Error("No verification code returned".to_string());
+                        if let Some(tx) = tx_clone.borrow_mut().take() {
+                            let _ = tx.send(CaptchaResult::Success(code_str));
+                        }
+                    } else if let Some(tx) = tx_clone.borrow_mut().take() {
+                        let _ = tx.send(CaptchaResult::Error(
+                            "No verification code returned".to_string(),
+                        ));
                     }
                 } else if !state_str.is_empty() {
                     console_error!(
@@ -113,8 +104,11 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
                         state_param,
                         state_str
                     );
-                    *result_writer.borrow_mut() =
-                        CaptchaResult::Error("State mismatch - possible security issue".to_string());
+                    if let Some(tx) = tx_clone.borrow_mut().take() {
+                        let _ = tx.send(CaptchaResult::Error(
+                            "State mismatch - possible security issue".to_string(),
+                        ));
+                    }
                 }
             }
         }) as Box<dyn FnMut(web_sys::MessageEvent)>);
@@ -124,23 +118,24 @@ pub fn CaptchaGate(props: CaptchaGateProps) -> Element {
             .add_event_listener_with_callback("message", listener.as_ref().unchecked_ref())
             .ok();
         listener.forget();
-    });
 
-    // Watch the shared result and dispatch Dioxus events when it changes
-    let result_rc_for_watch = result_cell();
-    use_effect(move || {
-        let result = result_rc_for_watch.borrow().clone();
-        match result {
-            CaptchaResult::Pending => {}
-            CaptchaResult::Success(code) => {
-                console_info!("[Captcha] Verification code received from iframe redirect");
-                on_success.call(code);
+        // Spawn an async task that awaits the oneshot result and calls Dioxus handlers.
+        // This runs in Dioxus context so on_success/on_error are safe to call.
+        // If the component unmounts, the spawned task is cancelled automatically.
+        spawn(async move {
+            if let Ok(result) = rx.await {
+                match result {
+                    CaptchaResult::Success(code) => {
+                        console_info!("[Captcha] Dispatching verification code to migration flow");
+                        on_success.call(code);
+                    }
+                    CaptchaResult::Error(err) => {
+                        console_error!("[Captcha] Error: {}", err);
+                        on_error.call(err);
+                    }
+                }
             }
-            CaptchaResult::Error(err) => {
-                console_error!("[Captcha] Error: {}", err);
-                on_error.call(err);
-            }
-        }
+        });
     });
 
     rsx! {
