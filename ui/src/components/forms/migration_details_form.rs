@@ -8,6 +8,9 @@ use crate::components::{
         ValidatedInput,
     },
 };
+
+#[cfg(feature = "web")]
+use crate::components::forms::CaptchaGate;
 use crate::migration::{
     form_validation::{get_form3_validation_message, validate_form3_complete},
     *,
@@ -80,6 +83,9 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
             dispatch.call(MigrationAction::SetBlobProgress(BlobProgress::default()));
         }
     });
+
+    // Track whether we're showing the captcha gate
+    let mut show_captcha = use_signal(|| false);
 
     // Extract handle validation logic into a reusable function
     let validate_handle_availability =
@@ -287,16 +293,29 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
                 }
             }
 
+            // Show captcha gate when PDS requires verification and we don't have a code yet
+            if show_captcha() && state().form3.verification_code.is_none() {
+                {render_captcha_gate(state, dispatch, show_captcha)}
+            }
+
             div {
                 class: "button-section",
                 button {
                     class: "migrate-button",
                     disabled: {
                         let current_state = state();
-                        current_state.is_migrating || !validate_form3_complete(&current_state)
+                        current_state.is_migrating || !validate_form3_complete(&current_state) || show_captcha()
                     },
                     onclick: move |_| {
                         let current_state = state();
+
+                        // If captcha is required and we don't have a verification code, show captcha first
+                        if current_state.captcha_required() && current_state.form3.verification_code.is_none() {
+                            console_info!("[Migration] Captcha required by target PDS - showing verification gate");
+                            show_captcha.set(true);
+                            return;
+                        }
+
                         dispatch.call(MigrationAction::SetMigrating(true));
                         dispatch.call(MigrationAction::SetMigrationError(None));
                         dispatch.call(MigrationAction::SetMigrationStep("Starting migration...".to_string()));
@@ -310,6 +329,8 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
                     },
                     if state().is_migrating {
                         "Migrating..."
+                    } else if show_captcha() {
+                        "Complete verification above..."
                     } else {
                         "Migrate"
                     }
@@ -370,4 +391,50 @@ pub fn MigrationDetailsForm(props: MigrationDetailsFormProps) -> Element {
             }
         }
     }
+}
+
+/// Render the captcha gate component (web feature only)
+#[cfg(feature = "web")]
+fn render_captcha_gate(
+    state: Signal<MigrationState>,
+    dispatch: EventHandler<MigrationAction>,
+    mut show_captcha: Signal<bool>,
+) -> Element {
+    rsx! {
+        CaptchaGate {
+            pds_url: state().form2.pds_url.clone(),
+            handle: state().form3.handle.clone(),
+            on_success: move |code: String| {
+                console_info!("[Captcha] Verification code received, starting migration");
+                dispatch.call(MigrationAction::SetVerificationCode(Some(code)));
+                show_captcha.set(false);
+
+                // Auto-start migration now that we have the code
+                let current_state = state();
+                dispatch.call(MigrationAction::SetMigrating(true));
+                dispatch.call(MigrationAction::SetMigrationError(None));
+                dispatch.call(MigrationAction::SetMigrationStep("Starting migration...".to_string()));
+                spawn(execute_migration_client_side(current_state, dispatch));
+            },
+            on_error: move |error: String| {
+                console_info!("[Captcha] Verification failed: {}", error);
+                show_captcha.set(false);
+                dispatch.call(MigrationAction::SetMigrationError(Some(format!("Captcha verification failed: {}", error))));
+            }
+        }
+    }
+}
+
+/// Render the captcha gate component (non-web fallback - not supported)
+#[cfg(not(feature = "web"))]
+fn render_captcha_gate(
+    _state: Signal<MigrationState>,
+    dispatch: EventHandler<MigrationAction>,
+    mut show_captcha: Signal<bool>,
+) -> Element {
+    show_captcha.set(false);
+    dispatch.call(MigrationAction::SetMigrationError(Some(
+        "Captcha verification is not supported in non-web builds".to_string(),
+    )));
+    rsx! {}
 }

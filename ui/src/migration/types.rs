@@ -152,6 +152,7 @@ pub enum MigrationAction {
     SetEmailAddress(String),
     SetInviteCode(String),
     SetSelectedDomain(String),
+    SetVerificationCode(Option<String>),
 
     // Form 4 - PLC Verification actions
     SetPlcVerificationCode(String),
@@ -216,6 +217,8 @@ pub struct MigrationDetailsForm {
     pub suggested_handle: String,
     pub is_checking_handle: bool,
     pub selected_domain: Option<String>,
+    /// Captcha verification code from PDS /gate/signup flow
+    pub verification_code: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -410,6 +413,9 @@ impl MigrationState {
             MigrationAction::SetSelectedDomain(domain) => {
                 self.form3.selected_domain = Some(domain);
             }
+            MigrationAction::SetVerificationCode(code) => {
+                self.form3.verification_code = code;
+            }
 
             // Form 4 - PLC Verification actions
             MigrationAction::SetPlcVerificationCode(code) => {
@@ -579,6 +585,9 @@ impl MigrationState {
             MigrationAction::SetSelectedDomain(domain) => {
                 self.form3.selected_domain = Some(domain);
             }
+            MigrationAction::SetVerificationCode(code) => {
+                self.form3.verification_code = code;
+            }
 
             // Form 4 - PLC Verification actions
             MigrationAction::SetPlcVerificationCode(code) => {
@@ -677,6 +686,15 @@ impl MigrationState {
                 }
             }
         }
+    }
+
+    /// Whether the target PDS requires captcha verification for account creation
+    pub fn captcha_required(&self) -> bool {
+        self.form2
+            .describe_response
+            .as_ref()
+            .and_then(|r| r.phone_verification_required)
+            .unwrap_or(false)
     }
 
     /// Helper methods for common state queries

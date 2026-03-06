@@ -86,12 +86,13 @@ pub async fn resolve_handle_slingshot(
     }
 
     // Parse JSON response: {"did": "did:plc:..."}
-    let json_response: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| ResolveError::JsonParseError {
-            error: format!("Failed to parse Slingshot response: {}", e),
-        })?;
+    let json_response: serde_json::Value =
+        response
+            .json()
+            .await
+            .map_err(|e| ResolveError::JsonParseError {
+                error: format!("Failed to parse Slingshot response: {}", e),
+            })?;
 
     let did = json_response
         .get("did")

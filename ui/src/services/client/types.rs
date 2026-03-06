@@ -120,6 +120,10 @@ pub struct ClientCreateAccountRequest {
     pub invite_code: Option<String>,
     #[serde(skip)] // Not part of AT Protocol API - used for Authorization header
     pub service_auth_token: Option<String>, // For creating accounts with existing DIDs
+    /// Captcha verification code from PDS /gate/signup flow
+    /// Required when PDS describeServer returns phoneVerificationRequired: true
+    #[serde(rename = "verificationCode", skip_serializing_if = "Option::is_none")]
+    pub verification_code: Option<String>,
 }
 
 /// Account creation response

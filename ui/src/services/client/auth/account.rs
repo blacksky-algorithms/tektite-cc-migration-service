@@ -33,6 +33,10 @@ pub async fn create_account_impl(
         request_body["inviteCode"] = json!(invite_code);
     }
 
+    if let Some(verification_code) = &request.verification_code {
+        request_body["verificationCode"] = json!(verification_code);
+    }
+
     let mut request_builder = client
         .http_client
         .post(&create_url)

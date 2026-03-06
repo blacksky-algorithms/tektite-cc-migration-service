@@ -223,6 +223,7 @@ pub async fn execute_migration_client_side(
                         Some(state.form3.invite_code.clone())
                     },
                     service_auth_token: Some(service_auth_token),
+                    verification_code: state.form3.verification_code.clone(),
                 };
 
                 match create_account_client_side(&migration_client, create_account_request.clone())
